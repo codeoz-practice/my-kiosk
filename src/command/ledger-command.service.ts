@@ -11,7 +11,6 @@ export class LedgerCommandService {
         where: { id: ledgerId, status: 'RELEASABLE' },
         data: { status: 'SETTLED', settledAt: new Date() },
       }); 
-    console.log('🚀 | LedgerCommandService | settle | result:', result);
 
     if (result.count === 0) {
       // where 조건에 안 걸린 이유가 "이미 정산 완료"인지, "애초에 정산 불가 상태"인지 구분한다.

@@ -2,7 +2,7 @@ import { Controller, Get, Param, Post } from '@nestjs/common';
 import { SettleLedgerParamDto } from 'src/command/dto/settle-ledger.dto';
 import { LedgerCommandService } from 'src/command/ledger-command.service';
 import { SellerDashboardDto } from 'src/query/dto/seller-dashboard.dto';
-import { LedgerQueryService } from 'src/query/ledget-query.service';
+import { LedgerQueryService } from 'src/query/ledger-query.service';
 
 @Controller('ledgers')
 export class LedgerController {
@@ -17,7 +17,7 @@ export class LedgerController {
   }
 
   @Get('seller/:sellerId/dashboard')
-  async getDataboard(@Param('sellerId') sellerId: string): Promise<SellerDashboardDto> {
+  async getDashboard(@Param('sellerId') sellerId: string): Promise<SellerDashboardDto> {
     return this.queryService.getSellerDashboard(sellerId);
   }
 }
