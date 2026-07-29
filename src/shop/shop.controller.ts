@@ -14,30 +14,41 @@ import { Shop } from '@prisma/client';
 import { SetActiveShopDto } from './dto/set-active-shop.dto';
 import { AddOwnersDto } from './dto/add-owners.dto';
 import { ShopWithOwners } from './shop.types';
+import { ApiBody, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
 
 @Controller('shop')
 export class ShopController {
   constructor(private readonly service: ShopService) {}
 
-  // 매장 생성
+  @ApiOperation({ summary: '매장 생성' })
   @Post()
   async create(@Body() createShopDto: CreateShopDto): Promise<Shop> {
     return this.service.create(createShopDto.name, createShopDto.ownerId);
   }
 
-  // 매장 조회
+  @ApiOperation({ summary: '매장 조회' })
+  @ApiQuery({
+    name: 'ownerId',
+    required: false,
+    type: String,
+    description: '점주 아이디',
+    example: 'be5588fb-ee29-47c3-8582-062bb3ab365c',
+  })
   @Get()
-  async getShops(@Query('ownerId') ownerId: string): Promise<ShopWithOwners[]> {
+  async getShops(
+    @Query('ownerId') ownerId?: string,
+  ): Promise<ShopWithOwners[]> {
     return this.service.getShop(ownerId);
   }
 
-  // 매장 상세
+  @ApiOperation({ summary: '매장 상세' })
   @Get(':shopId/details')
   async getShop(@Param('shopId') shopId: string): Promise<Shop> {
     return this.service.getShopDetail(shopId);
   }
 
-  // 점주 추가
+  @ApiOperation({ summary: '점주 추가' })
+  @ApiBody({ type: AddOwnersDto })
   @Post(':shopId/owner')
   async addOwner(
     @Param('shopId') shopId: string,
@@ -46,7 +57,7 @@ export class ShopController {
     return await this.service.addOwner(shopId, ownerId);
   }
 
-  // 점주 삭제
+  @ApiOperation({ summary: '점주 삭제' })
   @Delete(':id/owner/:userId')
   async removeOwner(
     @Param('id') shopId: string,
@@ -55,7 +66,8 @@ export class ShopController {
     return await this.service.removeOwner(shopId, userId);
   }
 
-  // 매장 활성화 설정
+  @ApiOperation({ summary: '매장 활성화 설정' })
+  @ApiBody({ type: SetActiveShopDto })
   @Patch(':id/active')
   async setActive(
     @Param('id') shopId: string,
@@ -64,7 +76,7 @@ export class ShopController {
     return await this.service.setActive(shopId, setActiveShopDto.isActive);
   }
 
-  // 매장 삭제(소프트 삭제)
+  @ApiOperation({ summary: '매장 삭제(소프트 삭제)' })
   @Delete(':id')
   async deleteShop(@Param('id') id: string): Promise<void> {
     return await this.service.deleteShop(id);
