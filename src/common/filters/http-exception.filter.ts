@@ -1,6 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
 import { Response, Request } from 'express';
-import { ErrorDetail } from '../dtos/error-response.dto';
+import { ErrorDetail } from '../dto/error-response.dto';
 import { Prisma } from '@prisma/client';
 
 @Catch()

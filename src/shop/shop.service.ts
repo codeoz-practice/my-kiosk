@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ShopRepository } from './repository/shop.repository';
+import { ShopRepository } from './shop.repository';
 import { Shop } from '@prisma/client';
 import { ShopWithOwners } from './shop.types';
 

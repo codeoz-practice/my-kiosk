@@ -1,7 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Shop } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { shopWithOwners, ShopWithOwners } from '../shop.types';
+import { shopWithOwners, ShopWithOwners } from './shop.types';
 
 @Injectable()
 export class ShopRepository {
