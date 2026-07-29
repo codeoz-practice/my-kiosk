@@ -8,12 +8,22 @@ datasource db {
   // Prisma 7: url은 prisma.config.ts에서 관리 (schema에 url 없음)
 }
 
+// 계정의 시스템상 역할일 뿐, 매장 소유 관계는 Shop.ownerId로만 판단한다.
+// MANAGER: 특정 매장에 소속되지 않는 전사 고객지원 센터 계정.
+enum UserType {
+  USER
+  MANAGER
+  OWNER
+}
+
 // 모델 정의는 여기에 추가
 // 예시:
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
+  userType UserType @default(USER) @map("user_type")
 
+  ownedShops ShopOwner[]
   tickets Ticket[]
   orders Order[]
   usageSessions UsageSession[]
@@ -21,27 +31,29 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@map("user")
 }
 
-// enum LedgerStatus {
-//   HELD
-//   RELEASABLE
-//   SETTLED
-//   CLAWBACK_PENDING
-// }
+enum LedgerStatus {
+  HELD
+  RELEASABLE
+  SETTLED
+  CLAWBACK_PENDING
+}
 
-// model Ledger {
-//   id String @id @default(uuid())
-//   sellerId String
-//   tradeId String
-//   amount Int
-//   status LedgerStatus
-//   settledAt DateTime?
-//   createdAt DateTime @default(now())
+model Ledger {
+  id String @id @default(uuid())
+  sellerId String
+  tradeId String
+  amount Int
+  status LedgerStatus
+  settledAt DateTime?
+  createdAt DateTime @default(now())
 
-//   @@index([sellerId])
-//   @@index([tradeId])
-// }
+  @@index([sellerId])
+  @@index([tradeId])
+}
 
 enum TicketType {
   TIME   // 시간권
@@ -291,7 +303,8 @@ model TicketProductHistory {
 // 매장 관리 모델
 model Shop {
   id String @id @default(uuid())
-  name String
+  name String @unique
+  owners ShopOwner[] // 이 매장의 공동 점주 목록. 점주 한 명이 여러 매장을 가질 수도 있다(User.ownedShops 참고).
   seats Seat[]
   products TicketProduct[]
   usageSessions UsageSession[]
@@ -299,9 +312,27 @@ model Shop {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  isActive  Boolean   @default(true) @map("is_active") // 운영 중 여부
+  deletedAt DateTime? @map("deleted_at") // 소프트 삭제
+
   @@index([name])
 
   @@map("shops")
+}
+
+// Shop ↔ User의 N:N 관계(공동 점주). 명시적 조인 모델로 두어
+// "언제부터 점주가 되었는지" 같은 부가 정보를 붙일 수 있게 한다.
+model ShopOwner {
+  shopId String @map("shop_id")
+  userId String @map("user_id")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at") // 점주로 등록된 시점
+
+  @@id([shopId, userId])
+  @@map("shop_owners")
 }
 
 // 좌석 관리 모델
