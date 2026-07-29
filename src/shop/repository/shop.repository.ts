@@ -25,13 +25,15 @@ export class ShopRepository {
     });
   }
 
-  async getShop(ownerId: string): Promise<ShopWithOwners[]> {
+  async getShop(ownerId?: string): Promise<ShopWithOwners[]> {
     return await this.prisma.shop.findMany({
-      where: {
-        owners: {
-          some: { userId: ownerId },
-        },
-      },
+      where: ownerId
+        ? {
+            owners: {
+              some: { userId: ownerId },
+            },
+          }
+        : undefined,
       ...shopWithOwners,
     });
   }

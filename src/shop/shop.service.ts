@@ -7,7 +7,7 @@ import { ShopWithOwners } from './shop.types';
 export class ShopService {
   constructor(private readonly repository: ShopRepository) {}
 
-  async getShop(ownerId: string): Promise<ShopWithOwners[]> {
+  async getShop(ownerId?: string): Promise<ShopWithOwners[]> {
     return this.repository.getShop(ownerId);
   }
 
