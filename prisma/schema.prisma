@@ -3,6 +3,10 @@ generator client {
   output   = "../node_modules/.prisma/client"
 }
 
+generator dbml {
+  provider = "prisma-dbml-generator"
+}
+
 datasource db {
   provider = "postgresql"
   // Prisma 7: url은 prisma.config.ts에서 관리 (schema에 url 없음)
@@ -16,8 +20,6 @@ enum UserType {
   OWNER
 }
 
-// 모델 정의는 여기에 추가
-// 예시:
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -27,10 +29,10 @@ model User {
   tickets Ticket[]
   orders Order[]
   usageSessions UsageSession[]
-  ticketProductHistories TicketProductHistory[]
+  ProductHistories ProductHistory[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("user")
 }
@@ -40,6 +42,8 @@ enum LedgerStatus {
   RELEASABLE
   SETTLED
   CLAWBACK_PENDING
+
+  @@map("ledger_status")
 }
 
 model Ledger {
@@ -48,11 +52,12 @@ model Ledger {
   tradeId String
   amount Int
   status LedgerStatus
-  settledAt DateTime?
-  createdAt DateTime @default(now())
+  settledAt DateTime? @map("settled_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([sellerId])
   @@index([tradeId])
+  @@map("ledger")
 }
 
 enum TicketType {
@@ -73,35 +78,34 @@ model Ticket {
   id String @id @default(uuid())
   userId String @map("user_id")
   type TicketType
-  
+  status TicketStatus @default(UNUSED)
+  orderItemId String @unique @map("order_item_id")  
+  usageSessions UsageSession[]
+  pauses TicketPause[]
+
   // 시간권 전용
-  minuteExpireAt DateTime? @map("minute_expire_at") // 이 날까지 분 소진 안 하면 소멸(구매일 + product.usableDays)
-  remainingMinutes Int? @map("remaining_minutes") // ⭐️ 잔여 시간의 유일한 원천(시간권만 사용)
+  purchasedMinutes Int? @map("purchased_minutes")   // 구매 시점 부여 시간 스냅샷
+  minuteExpireDeadline DateTime? @map("minute_expire_deadline") // 소진 기한(구매일 + product.usableDays)
+  remainingMinutes Int? @map("remaining_minutes")   // ⭐️ 잔여 시간의 유일한 원천(시간권만 사용)
 
   // 정기권 전용
-  activateBy DateTime? @map("activate_by")   // 이 날까지 활성화 안 하면 소멸(구매일 + product.usableDays)
-  activatedAt DateTime? @map("activated_at") // 첫 입장(활성화) 시각
-  expiresAt DateTime? @map("expires_at")     // ⭐️ activatedAt + durationDays 로 계산해서 저장
+  purchasedDurationDays Int? @map("purchased_duration_days") // 구매 시점 부여 기간 스냅샷
+  activationDeadline DateTime? @map("activation_deadline") // 정기권 활성화 기한(구매일 + product.usableDays)
+  activatedAt DateTime? @map("activated_at")        // 첫 입장(활성화) 시각
+  expiresAt DateTime? @map("expires_at")            // ⭐️ 정기권 실제 만료 시각(activatedAt + purchasedDurationDays)
 
-  status TicketStatus @default(UNUSED)
-  
-  user User @relation( fields: [userId], references: [id])
-
-  pauses TicketPause[]
-  usageSessions UsageSession[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  orderItemId String @unique @map("order_item_id")
   orderItem OrderItem @relation(fields: [orderItemId], references: [id])
+  user User @relation( fields: [userId], references: [id])
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
   
   // 관리자: 최근 변경된 티켓 목록
   @@index([status, updatedAt])
   
   // 사용자: 내 티켓 목록 (만료일 가까운 순)
   @@index([userId, expiresAt])
-  @@index([userId, minuteExpireAt])
+  @@index([userId, minuteExpireDeadline])
   
   // 사용자: 내 티켓 구매일 정렬
   @@index([userId, createdAt])
@@ -122,51 +126,45 @@ model TicketPause {
   
   ticket Ticket @relation(fields: [ticketId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // NOTE: Partial Unique Index → (ticket_id) WHERE resumed_at IS NULL
+  // 활성 정지(resumed_at IS NULL)는 ticketId당 하나만 허용 (raw migration으로 관리)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([ticketId, updatedAt])
   @@map("ticket_pauses")
 }
 
-// 상품 목록 모델(delete 쿼리 금지!)
-/**
-Prisma 미들웨어로 delete 차단
-prisma.$use(async (params, next) => {
-  if (params.model === 'TicketProduct' && params.action === 'delete')
-  {
-    throw new Error('TicketProduct는 삭제할 수 없습니다. deletedAt을 
-사용하세요.')
-  }
-  return next(params)                                                
-})
-**/
-model TicketProduct {
+
+model Product {
   id String @id @default(uuid())
   name String
-  type TicketType
+  ticketType TicketType @map("ticket_type")
   price Int // 금액
   shopId String @map("shop_id")
 
-  totalMinutes Int? @map("total_minutes") // 시간권 전용(구매시간)
-  durationDays Int? @map("duration_days") // 정기권 전용(구매기간)
-
   usableDays Int @map("usable_days") // 공통 - 구매 후 며칠 안에 사용/활성화해야 하는 상품인가
   isActive Boolean @default(true) @map("is_active") // 판매 활성화 유무
+  
+  purchasedMinutes Int? @map("purchased_minutes") // 시간권 전용 — 구매 시 제공되는 시간(분)
+  purchasedDurationDays Int? @map("purchased_duration_days") // 정기권 전용 — 구매 시 제공되는 기간(일)
 
   orderItems OrderItem[]
-  ticketProductHistories TicketProductHistory[]
+  productHistories ProductHistory[]
   shop Shop @relation(fields: [shopId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime? // 소프트 삭제 필드
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // 소프트 삭제 필드
 
-  @@map("ticket_products")
+  @@index([shopId])
+  @@map("products")
 }
 
 model Order {
   id String @id @default(uuid())
+  shopId String @map("shop_id")
   userId String @map("user_id")
   
   originalPrice   Int @map("original_price")  // 할인 전 금액
@@ -176,10 +174,11 @@ model Order {
   orderItems OrderItem[]
   payments Payment[]
 
+  shop Shop @relation(fields: [shopId], references: [id])
   user User @relation(fields: [userId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([userId, createdAt])
   @@map("orders")
@@ -187,15 +186,21 @@ model Order {
 
 model OrderItem {
   id String @id @default(uuid())
-  price Int // 구매 시점 가격 스냅샷
-  totalMinutes Int? @map("total_minutes") // 시간권: 구매 시점 분 스냅샷
-  durationDays Int? @map("duration_days") // 정기권: 구매 시점 기간 스냅샷
+  ticketType TicketType @map("ticket_type") // 구매 시점 티켓 타입
+  originalPrice Int @map("original_price")// 구매 시점 가격 스냅샷
+  discountAmount Int @map("discount_amount") // 항목 할인액
+  price Int // 실결제 금액 스냅샷(originalPrice - discountAmount)
+  purchasedMinutes Int? @map("purchased_minutes") // 시간권: 구매 시점 분 스냅샷
+  purchasedDurationDays Int? @map("purchased_duration_days") // 정기권: 구매 시점 기간 스냅샷
+  usableDays Int @map("usable_days") // 구매 시점 활성화/소진 기한 스냅샷(티켓 생성 시 기한 계산에 사용)
   orderId String @map("order_id")
   productId String @map("product_id")
 
   ticket Ticket?
-  product TicketProduct @relation(fields: [productId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
   order Order @relation(fields: [orderId], references: [id])
+  cancelItems PaymentCancelItem[] // 이 상품에 대한 취소 내역(잔여 사용량 비례 부분 취소 시 여러 건 가능)
+  refundLock RefundLock? // 이 상품에 대해 현재 진행 중인 환불이 있으면 존재(동시 중복 진행 방지용 락)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -228,22 +233,94 @@ model Payment {
   orderId String @map("order_id")
   price Int   // 결재 금액
   van VanType? // 카드 대행사
-  requestedAt DateTime? @map("requested_at") // VAN사 승인 요청 시각
-  approvedAt DateTime? @map("approved_at")   // 승인 완료 시각
-  cancelledAt DateTime? @map("cancelled_at") // 취소 시각
+  pgTransactionId String? @unique // 거래 고유 ID (요청 응답으로 수신)
+  requestedAt DateTime? @map("requested_at") // 결재 승인 요청 시각
+  approvedAt DateTime? @map("approved_at")   // 결재 승인 완료 시각
 
   order Order @relation(fields: [orderId], references: [id])
 
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @updatedAt @map("updated_at")
+  reason String? // 결재 실패 시 이유
+
+  cancels PaymentCancel[]
 
   @@index([orderId])
   @@map("payments")
 }
 
+enum PaymentCancelStatus {
+  REQUESTED // PG에 취소 요청 발송, 응답 대기중(미확정)
+  SUCCEEDED // PG가 취소 확정
+  FAILED    // PG가 취소를 확정적으로 거절
+}
+
+model PaymentCancel {
+  id        String   @id @default(uuid())
+  paymentId String   @map("payment_id")
+  amount    Int                           // 취소 금액 (부분 취소 가능)
+  reason    String?                       // 취소 사유(고객이 취소를 요청한 이유)
+  status    PaymentCancelStatus @default(REQUESTED)
+  failureReason String? @map("failure_reason") // 확정 실패 시 PG 응답 사유 상세
+  pgTransactionId String? @unique @map("pg_transaction_id") // PG사 취소 거래 ID (취소 요청 응답으로 수신)
+  requestedAt  DateTime  @map("requested_at")  // 취소 요청 시각
+  cancelledAt  DateTime? @map("cancelled_at")  // 취소 완료 시각
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+  items PaymentCancelItem[] // 이 취소 요청에 포함된 상품별 내역
+  locks RefundLock[] // 이 취소 요청이 보유 중인 상품별 락(확정되면 삭제됨)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([paymentId])
+  @@index([status])
+  @@map("payment_cancels")
+}
+
+// 하나의 PG 취소 요청(PaymentCancel)이 어떤 상품(OrderItem)들에 대한 것인지 기록하는 연결 모델
+// 상품별 취소 금액(amount)을 개별로 가지므로, 잔여 사용량 비례 등 상품 단위 부분 취소도 표현 가능하다
+model PaymentCancelItem {
+  id              String   @id @default(uuid())
+  paymentCancelId String   @map("payment_cancel_id")
+  orderItemId     String   @map("order_item_id")
+  amount          Int                                 // 이 상품에 대해 취소된 금액(부분 취소 가능)
+
+  paymentCancel PaymentCancel @relation(fields: [paymentCancelId], references: [id])
+  orderItem     OrderItem     @relation(fields: [orderItemId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([paymentCancelId])
+  @@index([orderItemId])
+  @@map("payment_cancel_items")
+}
+
+// 상품(OrderItem) 단위 환불 동시 진행 방지용 락 테이블(예약 패턴)
+// 행이 존재 = 그 상품에 대해 미확정 취소가 진행 중, 행이 없음 = 새 취소 요청 가능
+// PaymentCancel 생성과 같은 트랜잭션에서 INSERT, 확정(성공/실패) 시 같은 트랜잭션에서 DELETE
+// expiresAt: 서버 크래시로 락 해제가 누락된 경우, 다음 락 획득 시도 시 만료된 락을 정리(자가 치유)하기 위한 TTL
+model RefundLock {
+  orderItemId String @id @map("order_item_id")
+  paymentCancelId String @map("payment_cancel_id")
+  expiresAt DateTime @map("expires_at")
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id])
+  paymentCancel PaymentCancel @relation(fields: [paymentCancelId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("refund_locks")
+}
+
 enum UsageSessionStatus {
   ACTIVE
   ENDED
+  JOB_CREATION_FAILED
+  JOB_REGISTER_FAILED
+  EXTERNAL_API_FAILED
 }
 
 // 실제 이용중인 이용권 관리 모델
@@ -258,16 +335,19 @@ model UsageSession {
   plannedEndAt DateTime @map("planned_end_at") // 시작 시점의 이용권 잔여시간으로 계산한 예정 종료 시간
   endedAt DateTime? @map("ended_at") // 실제 종료 시각(조기퇴실이면 plannedEndAt 보다 빠름)
   status UsageSessionStatus @default(ACTIVE)
-  bullmqJobId String
+  failureReason String? @map("failure_reason") // 활성화 실패 시 원인 상세 (Prisma 에러 코드, 외부 API 응답 등)
+  bullmqJobId String?
 
   ticket Ticket @relation(fields: [ticketId], references: [id])
   seat Seat @relation(fields: [seatId], references: [id])
   shop Shop @relation(fields: [shopId], references: [id])
   user User @relation(fields: [userId], references: [id])
 
+  // NOTE: Partial Unique Index → (ticket_id) WHERE ended_at IS NULL
+  // 활성 세션(ended_at IS NULL)은 ticketId당 하나만 허용 (raw migration으로 관리)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // 매장별 이용중인 좌석 조회
   @@index([shopId, status])
@@ -278,26 +358,26 @@ model UsageSession {
 }
 
 // 티겟 상품 변경 이력 관리 모델(delete/update 불가 이력 관리용)
-model TicketProductHistory {
+model ProductHistory {
   id String @id @default(uuid())
-  changeGroupId String @map("change_group_id") // 동시에 여러 필드가 바뀐 '한 번의 수정'을 묶는 그룹 id 
-  ticketProductId String @map("ticket_product_id")
+  changeGroupId String @map("change_group_id") // 동시에 여러 필드가 바뀐 '한 번의 수정'을 묶는 그룹 id
+  productId String @map("product_id")
   changedField String @map("changed_field")
   oldValue String? @map("old_value")
   newValue String? @map("new_value")
   changedBy String @map("changed_by")
   user User @relation(fields: [changedBy], references: [id])
 
-  ticketProduct TicketProduct @relation(fields: [ticketProductId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
 
   changedAt DateTime @default(now()) @map("changed_at")
 
   // 상품별 변경 이력 조회
-  @@index([ticketProductId, changedAt])
+  @@index([productId, changedAt])
   // 같은 시점 변경 묶음 조회
   @@index([changeGroupId])
 
-  @@map("ticket_product_histories")
+  @@map("product_histories")
 }
 
 // 매장 관리 모델
@@ -306,8 +386,9 @@ model Shop {
   name String @unique
   owners ShopOwner[] // 이 매장의 공동 점주 목록. 점주 한 명이 여러 매장을 가질 수도 있다(User.ownedShops 참고).
   seats Seat[]
-  products TicketProduct[]
+  products Product[]
   usageSessions UsageSession[]
+  orders Order[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -335,19 +416,25 @@ model ShopOwner {
   @@map("shop_owners")
 }
 
+enum SeatStatus {
+  AVAILABLE   // 사용 가능
+  UNAVAILABLE // 이용 불가 (고장, 점검 등)
+}
+
 // 좌석 관리 모델
 model Seat {
-  id String @id @default(uuid())
+  id     String     @id @default(uuid())
   number Int
-  name String
-  shopId String @map("shop_id")
+  name   String     @default("")
+  shopId String     @map("shop_id")
+  status SeatStatus @default(AVAILABLE)
   shop Shop @relation(fields: [shopId], references: [id])
   usageSession UsageSession[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   
-  // 매장별 좌석 조회 및 정렬
-  @@index([shopId, number])
+  // 매장별 좌석 조회 및 정렬 + 매장 내 좌석 번호 중복 방지
+  @@unique([shopId, number])
   @@map("seats")
 }

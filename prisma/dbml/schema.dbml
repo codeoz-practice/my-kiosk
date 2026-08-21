@@ -1,0 +1,353 @@
+//// ------------------------------------------------------
+//// THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+//// ------------------------------------------------------
+
+Table user {
+  id String [pk]
+  email String [unique, not null]
+  userType UserType [not null, default: 'USER']
+  ownedShops shop_owners [not null]
+  tickets tickets [not null]
+  orders orders [not null]
+  usageSessions usage_sessions [not null]
+  ProductHistories product_histories [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table ledger {
+  id String [pk]
+  sellerId String [not null]
+  tradeId String [not null]
+  amount Int [not null]
+  status LedgerStatus [not null]
+  settledAt DateTime
+  createdAt DateTime [default: `now()`, not null]
+}
+
+Table tickets {
+  id String [pk]
+  userId String [not null]
+  type TicketType [not null]
+  status TicketStatus [not null, default: 'UNUSED']
+  orderItemId String [unique, not null]
+  usageSessions usage_sessions [not null]
+  pauses ticket_pauses [not null]
+  purchasedMinutes Int
+  minuteExpireDeadline DateTime
+  remainingMinutes Int
+  purchasedDurationDays Int
+  activationDeadline DateTime
+  activatedAt DateTime
+  expiresAt DateTime
+  orderItem order_items [not null]
+  user user [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table ticket_pauses {
+  id String [pk]
+  ticketId String [not null]
+  pausedAt DateTime [not null]
+  pausedReason String
+  pausedBy String [not null]
+  resumedAt DateTime
+  resumedReason String
+  resumedBy String
+  ticket tickets [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table products {
+  id String [pk]
+  name String [not null]
+  ticketType TicketType [not null]
+  price Int [not null]
+  shopId String [not null]
+  usableDays Int [not null]
+  isActive Boolean [not null, default: true]
+  purchasedMinutes Int
+  purchasedDurationDays Int
+  orderItems order_items [not null]
+  productHistories product_histories [not null]
+  shop shops [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  deletedAt DateTime
+}
+
+Table orders {
+  id String [pk]
+  shopId String [not null]
+  userId String [not null]
+  originalPrice Int [not null]
+  discountAmount Int [not null, default: 0]
+  totalAmount Int [not null]
+  orderItems order_items [not null]
+  payments payments [not null]
+  shop shops [not null]
+  user user [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table order_items {
+  id String [pk]
+  ticketType TicketType [not null]
+  originalPrice Int [not null]
+  discountAmount Int [not null]
+  price Int [not null]
+  purchasedMinutes Int
+  purchasedDurationDays Int
+  usableDays Int [not null]
+  orderId String [not null]
+  productId String [not null]
+  ticket tickets
+  product products [not null]
+  order orders [not null]
+  cancelItems payment_cancel_items [not null]
+  refundLock refund_locks
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table payments {
+  id String [pk]
+  type PaymentType [not null]
+  status PaymentStatus [not null, default: 'PENDING']
+  orderId String [not null]
+  price Int [not null]
+  van VanType
+  pgTransactionId String [unique]
+  requestedAt DateTime
+  approvedAt DateTime
+  order orders [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  reason String
+  cancels payment_cancels [not null]
+}
+
+Table payment_cancels {
+  id String [pk]
+  paymentId String [not null]
+  amount Int [not null]
+  reason String
+  status PaymentCancelStatus [not null, default: 'REQUESTED']
+  failureReason String
+  pgTransactionId String [unique]
+  requestedAt DateTime [not null]
+  cancelledAt DateTime
+  payment payments [not null]
+  items payment_cancel_items [not null]
+  locks refund_locks [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table payment_cancel_items {
+  id String [pk]
+  paymentCancelId String [not null]
+  orderItemId String [not null]
+  amount Int [not null]
+  paymentCancel payment_cancels [not null]
+  orderItem order_items [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table refund_locks {
+  orderItemId String [pk]
+  paymentCancelId String [not null]
+  expiresAt DateTime [not null]
+  orderItem order_items [not null]
+  paymentCancel payment_cancels [not null]
+  createdAt DateTime [default: `now()`, not null]
+}
+
+Table usage_sessions {
+  id String [pk]
+  ticketId String [not null]
+  seatId String [not null]
+  shopId String [not null]
+  userId String [not null]
+  startedAt DateTime [default: `now()`, not null]
+  plannedEndAt DateTime [not null]
+  endedAt DateTime
+  status UsageSessionStatus [not null, default: 'ACTIVE']
+  failureReason String
+  bullmqJobId String
+  ticket tickets [not null]
+  seat seats [not null]
+  shop shops [not null]
+  user user [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+}
+
+Table product_histories {
+  id String [pk]
+  changeGroupId String [not null]
+  productId String [not null]
+  changedField String [not null]
+  oldValue String
+  newValue String
+  changedBy String [not null]
+  user user [not null]
+  product products [not null]
+  changedAt DateTime [default: `now()`, not null]
+}
+
+Table shops {
+  id String [pk]
+  name String [unique, not null]
+  owners shop_owners [not null]
+  seats seats [not null]
+  products products [not null]
+  usageSessions usage_sessions [not null]
+  orders orders [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  isActive Boolean [not null, default: true]
+  deletedAt DateTime
+}
+
+Table shop_owners {
+  shopId String [not null]
+  userId String [not null]
+  shop shops [not null]
+  user user [not null]
+  createdAt DateTime [default: `now()`, not null]
+
+  indexes {
+    (shopId, userId) [pk]
+  }
+}
+
+Table seats {
+  id String [pk]
+  number Int [not null]
+  name String [not null, default: '']
+  shopId String [not null]
+  status SeatStatus [not null, default: 'AVAILABLE']
+  shop shops [not null]
+  usageSession usage_sessions [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+
+  indexes {
+    (shopId, number) [unique]
+  }
+}
+
+Enum UserType {
+  USER
+  MANAGER
+  OWNER
+}
+
+Enum LedgerStatus {
+  HELD
+  RELEASABLE
+  SETTLED
+  CLAWBACK_PENDING
+}
+
+Enum TicketType {
+  TIME
+  PERIOD
+}
+
+Enum TicketStatus {
+  UNUSED
+  ACTIVE
+  EXPIRED
+  EXHAUSTED
+  REVOKED
+}
+
+Enum PaymentType {
+  CARD
+  CASH
+}
+
+Enum VanType {
+  NICE
+  KCP
+  KSNET
+}
+
+Enum PaymentStatus {
+  PENDING
+  REQUESTED
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+Enum PaymentCancelStatus {
+  REQUESTED
+  SUCCEEDED
+  FAILED
+}
+
+Enum UsageSessionStatus {
+  ACTIVE
+  ENDED
+  JOB_CREATION_FAILED
+  JOB_REGISTER_FAILED
+  EXTERNAL_API_FAILED
+}
+
+Enum SeatStatus {
+  AVAILABLE
+  UNAVAILABLE
+}
+
+Ref: tickets.orderItemId - order_items.id
+
+Ref: tickets.userId > user.id
+
+Ref: ticket_pauses.ticketId > tickets.id
+
+Ref: products.shopId > shops.id
+
+Ref: orders.shopId > shops.id
+
+Ref: orders.userId > user.id
+
+Ref: order_items.productId > products.id
+
+Ref: order_items.orderId > orders.id
+
+Ref: payments.orderId > orders.id
+
+Ref: payment_cancels.paymentId > payments.id
+
+Ref: payment_cancel_items.paymentCancelId > payment_cancels.id
+
+Ref: payment_cancel_items.orderItemId > order_items.id
+
+Ref: refund_locks.orderItemId - order_items.id
+
+Ref: refund_locks.paymentCancelId > payment_cancels.id
+
+Ref: usage_sessions.ticketId > tickets.id
+
+Ref: usage_sessions.seatId > seats.id
+
+Ref: usage_sessions.shopId > shops.id
+
+Ref: usage_sessions.userId > user.id
+
+Ref: product_histories.changedBy > user.id
+
+Ref: product_histories.productId > products.id
+
+Ref: shop_owners.shopId > shops.id
+
+Ref: shop_owners.userId > user.id
+
+Ref: seats.shopId > shops.id

@@ -2,6 +2,11 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from
 import { Response, Request } from 'express';
 import { ErrorDetail } from '../dto/error-response.dto';
 import { Prisma } from '@prisma/client';
+import { SeatAlreadyOccupiedError } from 'src/usage-session/errors/seat-already-occupied.error';
+import { DomainConflictError } from '../errors/domain-conflict.error';
+import { DomainNotFoundError } from '../errors/domain-not-found.error';
+import { DomainBadRequestError } from '../errors/domain-bad-request.error';
+import { DomainForbiddenError } from '../errors/domain-forbidden.error';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -30,6 +35,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
         errorDetail.message = responseObj.message || exception.message;
         errorDetail.details = responseObj.errors || responseObj.error;
       }
+    } else if (exception instanceof DomainConflictError) {
+      status = HttpStatus.CONFLICT;
+      errorDetail.code = exception.name;
+      errorDetail.message = exception.message;
+    } else if (exception instanceof DomainNotFoundError) {
+      status = HttpStatus.NOT_FOUND;
+      errorDetail.code = exception.name;
+      errorDetail.message = exception.message;
+    } else if (exception instanceof DomainBadRequestError) {
+      status = HttpStatus.BAD_REQUEST;
+      errorDetail.code = exception.name;
+      errorDetail.message = exception.message;
+    } else if (exception instanceof DomainForbiddenError) {
+      status = HttpStatus.FORBIDDEN;
+      errorDetail.code = exception.name;
+      errorDetail.message = exception.message;
     }
     // 2. Prisma 에러 처리
     else if (exception instanceof Prisma.PrismaClientKnownRequestError) {

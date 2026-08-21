@@ -1,0 +1,385 @@
+{
+  "version": "2.0.0",
+  "darkMode": true,
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "tablePositions": [
+      {
+        "name": "user",
+        "schemaName": "public",
+        "x": 750.6427788504022,
+        "y": 649.178500965362
+      },
+      {
+        "name": "Ledger",
+        "schemaName": "public",
+        "x": 12,
+        "y": 12
+      },
+      {
+        "name": "tickets",
+        "schemaName": "public",
+        "x": 793.1616811975318,
+        "y": 11.232029333083304
+      },
+      {
+        "name": "ticket_pauses",
+        "schemaName": "public",
+        "x": 1573.75732421875,
+        "y": 12
+      },
+      {
+        "name": "products",
+        "schemaName": "public",
+        "x": 1009.481974528365,
+        "y": 1277.000657656621
+      },
+      {
+        "name": "orders",
+        "schemaName": "public",
+        "x": 683.4107495173191,
+        "y": 1523.5894697015547
+      },
+      {
+        "name": "order_items",
+        "schemaName": "public",
+        "x": 48,
+        "y": 1072
+      },
+      {
+        "name": "payments",
+        "schemaName": "public",
+        "x": 136,
+        "y": 1664
+      },
+      {
+        "name": "payment_cancels",
+        "schemaName": "public",
+        "x": 336,
+        "y": 712
+      },
+      {
+        "name": "usage_sessions",
+        "schemaName": "public",
+        "x": 1530.5357221149598,
+        "y": 166.87371208911753
+      },
+      {
+        "name": "product_histories",
+        "schemaName": "public",
+        "x": 1160,
+        "y": 280
+      },
+      {
+        "name": "shops",
+        "schemaName": "public",
+        "x": 2098.7515893368336,
+        "y": 736.4264731907812
+      },
+      {
+        "name": "shop_owners",
+        "schemaName": "public",
+        "x": 929.89990234375,
+        "y": 1129
+      },
+      {
+        "name": "seats",
+        "schemaName": "public",
+        "x": 1194.1428884598388,
+        "y": 730.7649016026862
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": [
+      {
+        "firstFieldNames": [
+          "orderItemId"
+        ],
+        "firstTableName": "tickets",
+        "firstSchemaName": "public",
+        "firstRelation": "1",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "order_items",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "userId"
+        ],
+        "firstTableName": "tickets",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "user",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "ticketId"
+        ],
+        "firstTableName": "ticket_pauses",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "tickets",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "shopId"
+        ],
+        "firstTableName": "products",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "shops",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "shopId"
+        ],
+        "firstTableName": "orders",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "shops",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "userId"
+        ],
+        "firstTableName": "orders",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "user",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "productId"
+        ],
+        "firstTableName": "order_items",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "products",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "orderId"
+        ],
+        "firstTableName": "order_items",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "orders",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "orderId"
+        ],
+        "firstTableName": "payments",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "orders",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "paymentId"
+        ],
+        "firstTableName": "payment_cancels",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "payments",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "ticketId"
+        ],
+        "firstTableName": "usage_sessions",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "tickets",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "seatId"
+        ],
+        "firstTableName": "usage_sessions",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "seats",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "shopId"
+        ],
+        "firstTableName": "usage_sessions",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "shops",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "userId"
+        ],
+        "firstTableName": "usage_sessions",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "user",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "changedBy"
+        ],
+        "firstTableName": "product_histories",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "user",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "productId"
+        ],
+        "firstTableName": "product_histories",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "products",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "shopId"
+        ],
+        "firstTableName": "seats",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "shops",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "shopId"
+        ],
+        "firstTableName": "shop_owners",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "shops",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "userId"
+        ],
+        "firstTableName": "shop_owners",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "user",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      }
+    ]
+  },
+  "views": {}
+}

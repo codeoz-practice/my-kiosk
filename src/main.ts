@@ -14,6 +14,7 @@ async function bootstrap() {
     .setDescription('키오스크 플랫폼 백앤드 API 문서')
     .setVersion('1.0')
     .addTag('shop', '매장 관리')
+    .addTag('seat', '좌석 관리')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document, {
