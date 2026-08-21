@@ -11,7 +11,6 @@ import { PaymentModule } from './payment/payment.module';
 import { ProductModule } from './product/product.module';
 import { TicketModule } from './ticket/ticket.module';
 import { BullModule } from '@nestjs/bullmq';
-import { RefundModule } from './refund/refund.module';
 
 @Module({
   imports: [
@@ -33,7 +32,6 @@ import { RefundModule } from './refund/refund.module';
     PaymentModule,
     ProductModule,
     TicketModule,
-    RefundModule,
   ],
   controllers: [AppController],
   providers: [AppService],

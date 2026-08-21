@@ -2,10 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { ShopRepository } from './shop.repository';
 import { Shop } from '@prisma/client';
 import { ShopWithOwners } from './shop.types';
+import { SeatRepository } from 'src/seat/seat.repository';
+import { UsageSessionRepository } from 'src/usage-session/usage-session.repository';
 
 @Injectable()
 export class ShopService {
-  constructor(private readonly repository: ShopRepository) {}
+  constructor(
+    private readonly repository: ShopRepository,
+    private readonly seatRepository: SeatRepository,
+    private readonly usageSessionRepository: UsageSessionRepository,
+  ) {}
 
   async getShop(ownerId?: string): Promise<ShopWithOwners[]> {
     return this.repository.getShop(ownerId);

@@ -14,9 +14,16 @@ import { Shop } from '@prisma/client';
 import { SetActiveShopDto } from './dto/set-active-shop.dto';
 import { AddOwnersDto } from './dto/add-owners.dto';
 import { ShopWithOwners } from './shop.types';
-import { ApiBody, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 
-@Controller('shop')
+@ApiTags('shops')
+@Controller('shops')
 export class ShopController {
   constructor(private readonly service: ShopService) {}
 
@@ -49,7 +56,7 @@ export class ShopController {
 
   @ApiOperation({ summary: '점주 추가' })
   @ApiBody({ type: AddOwnersDto })
-  @Post(':shopId/owner')
+  @Post(':shopId/owners')
   async addOwner(
     @Param('shopId') shopId: string,
     @Body() { ownerId }: AddOwnersDto,
@@ -58,7 +65,7 @@ export class ShopController {
   }
 
   @ApiOperation({ summary: '점주 삭제' })
-  @Delete(':id/owner/:userId')
+  @Delete(':id/owners/:userId')
   async removeOwner(
     @Param('id') shopId: string,
     @Param('userId') userId: string,
