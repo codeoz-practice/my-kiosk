@@ -1,4 +1,4 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { ErrorDetail } from '../dto/error-response.dto';
 import { Prisma } from '@prisma/client';
@@ -7,9 +7,12 @@ import { DomainConflictError } from '../errors/domain-conflict.error';
 import { DomainNotFoundError } from '../errors/domain-not-found.error';
 import { DomainBadRequestError } from '../errors/domain-bad-request.error';
 import { DomainForbiddenError } from '../errors/domain-forbidden.error';
+import { DomainUnauthorizedError } from '../errors';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -51,6 +54,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       status = HttpStatus.FORBIDDEN;
       errorDetail.code = exception.name;
       errorDetail.message = exception.message;
+    } else if (exception instanceof DomainUnauthorizedError) {
+      status = HttpStatus.UNAUTHORIZED;
+      errorDetail.code = exception.name;
+      errorDetail.message = exception.message;
     }
     // 2. Prisma 에러 처리
     else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
@@ -69,6 +76,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
     else if (exception instanceof Error) {
       errorDetail.message = '서버 내부 오류가 발생했습니다';
       errorDetail.code = 'INTERNAL_SERVER_ERROR';
+    }
+
+    const logMessage = `${request.method} ${request.path} ${status}`;
+    if (status >= 500) {
+      this.logger.error(logMessage, exception instanceof Error ? exception.stack : String(exception));
+    } else {
+      this.logger.warn(logMessage, errorDetail.message);
     }
 
     response.status(status).json({

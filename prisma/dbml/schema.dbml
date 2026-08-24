@@ -5,7 +5,11 @@
 Table user {
   id String [pk]
   email String [unique, not null]
-  userType UserType [not null, default: 'USER']
+  role UserRole [not null, default: 'USER']
+  password String
+  isActive Boolean [not null, default: true]
+  refreshTokens refresh_tokens [not null]
+  oauthAccounts oauth_accounts [not null]
   ownedShops shop_owners [not null]
   tickets tickets [not null]
   orders orders [not null]
@@ -13,6 +17,29 @@ Table user {
   ProductHistories product_histories [not null]
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
+}
+
+Table oauth_accounts {
+  id String [pk]
+  userId String [not null]
+  provider OAuthProvider [not null]
+  providerId String [not null]
+  user user [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+
+  indexes {
+    (provider, providerId) [unique]
+  }
+}
+
+Table refresh_tokens {
+  id String [pk]
+  userId String [not null]
+  tokenHash String [not null]
+  expiresAt DateTime [not null]
+  createdAt DateTime [default: `now()`, not null]
+  user user [not null]
 }
 
 Table ledger {
@@ -242,10 +269,15 @@ Table seats {
   }
 }
 
-Enum UserType {
+Enum UserRole {
   USER
   MANAGER
   OWNER
+}
+
+Enum OAuthProvider {
+  GOOGLE
+  GITHUB
 }
 
 Enum LedgerStatus {
@@ -305,6 +337,10 @@ Enum SeatStatus {
   AVAILABLE
   UNAVAILABLE
 }
+
+Ref: oauth_accounts.userId > user.id
+
+Ref: refresh_tokens.userId > user.id
 
 Ref: tickets.orderItemId - order_items.id
 

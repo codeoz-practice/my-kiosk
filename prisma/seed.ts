@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import * as bcrypt from 'bcrypt';
 import {
   PrismaClient,
-  UserType,
+  UserRole,
+  OAuthProvider,
   TicketType,
   TicketStatus,
   PaymentType,
@@ -32,6 +34,7 @@ const USER = {
   user2: '10000000-0000-0000-0000-000000000012', // user2@test.com
   user3: '10000000-0000-0000-0000-000000000013', // user3@test.com
   user4: '10000000-0000-0000-0000-000000000014', // user4@test.com
+  userOauth: '10000000-0000-0000-0000-000000000015', // oauth-user@test.com (OAuth 전용, 비밀번호 없음)
 };
 
 const SHOP = {
@@ -80,6 +83,8 @@ async function resetSeedData() {
   await prisma.seat.deleteMany({});
   await prisma.shopOwner.deleteMany({});
   await prisma.shop.deleteMany({});
+  await prisma.oAuthAccount.deleteMany({});
+  await prisma.refreshToken.deleteMany({});
   await prisma.user.deleteMany({});
   console.log('기존 시드 데이터 초기화 완료');
 }
@@ -89,20 +94,36 @@ async function resetSeedData() {
 // ─────────────────────────────────────────────────────────
 
 async function seedUsers() {
+  // 테스트 환경 전용 비밀번호 해시 (평문: test1234)
+  const hashedPassword = await bcrypt.hash('test1234', 10);
   await prisma.user.createMany({
     data: [
-      { id: USER.manager, email: 'manager@test.com', userType: UserType.MANAGER },
-      { id: USER.ownerGangnam, email: 'owner-gangnam@test.com', userType: UserType.OWNER },
-      { id: USER.ownerShared, email: 'owner-shared@test.com', userType: UserType.OWNER },
-      { id: USER.ownerShared2, email: 'owner-shared2@test.com', userType: UserType.OWNER },
-      { id: USER.ownerClosed, email: 'owner-closed@test.com', userType: UserType.OWNER },
-      { id: USER.user1, email: 'user1@test.com', userType: UserType.USER },
-      { id: USER.user2, email: 'user2@test.com', userType: UserType.USER },
-      { id: USER.user3, email: 'user3@test.com', userType: UserType.USER },
-      { id: USER.user4, email: 'user4@test.com', userType: UserType.USER },
+      { id: USER.manager, email: 'manager@test.com', role: UserRole.MANAGER, password: hashedPassword },
+      { id: USER.ownerGangnam, email: 'owner-gangnam@test.com', role: UserRole.OWNER, password: hashedPassword },
+      { id: USER.ownerShared, email: 'owner-shared@test.com', role: UserRole.OWNER, password: hashedPassword },
+      { id: USER.ownerShared2, email: 'owner-shared2@test.com', role: UserRole.OWNER, password: hashedPassword },
+      { id: USER.ownerClosed, email: 'owner-closed@test.com', role: UserRole.OWNER, password: hashedPassword },
+      { id: USER.user1, email: 'user1@test.com', role: UserRole.USER, password: hashedPassword },
+      { id: USER.user2, email: 'user2@test.com', role: UserRole.USER, password: hashedPassword },
+      { id: USER.user3, email: 'user3@test.com', role: UserRole.USER, password: hashedPassword },
+      { id: USER.user4, email: 'user4@test.com', role: UserRole.USER, password: hashedPassword },
+      // OAuth 전용 유저 — password null
+      { id: USER.userOauth, email: 'oauth-user@test.com', role: UserRole.USER, password: null },
     ],
   });
-  console.log('User 생성 완료: 9명 (MANAGER 1, OWNER 4, USER 4)');
+  console.log('User 생성 완료: 10명 (MANAGER 1, OWNER 4, USER 5 — OAuth 전용 1명 포함)');
+}
+
+async function seedOAuthAccounts() {
+  await prisma.oAuthAccount.createMany({
+    data: [
+      // OAuth 전용 유저 — Google 연결
+      { userId: USER.userOauth, provider: OAuthProvider.GOOGLE, providerId: 'google-uid-00015' },
+      // 로컬 로그인 유저가 추가로 Github 연결한 케이스 (멀티 프로바이더 시나리오)
+      { userId: USER.user1, provider: OAuthProvider.GITHUB, providerId: 'github-uid-00011' },
+    ],
+  });
+  console.log('OAuthAccount 생성 완료: 2건 (Google 1, Github 1)');
 }
 
 // ─────────────────────────────────────────────────────────
@@ -670,6 +691,7 @@ async function createUsageSession(params: {
 async function main() {
   await resetSeedData();
   await seedUsers();
+  await seedOAuthAccounts();
   await seedShopsAndSeats();
   await seedProducts();
 

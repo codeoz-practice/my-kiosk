@@ -1,1 +1,6 @@
-export abstract class DomainBadRequestError extends Error {}
+export class DomainBadRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DomainBadRequestError';
+  }
+}

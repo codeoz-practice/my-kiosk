@@ -1,1 +1,6 @@
-export abstract class DomainNotFoundError extends Error {}
+export class DomainNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DomainNotFoundError';
+  }
+}

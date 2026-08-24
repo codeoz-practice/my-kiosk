@@ -11,6 +11,11 @@ import { PaymentModule } from './payment/payment.module';
 import { ProductModule } from './product/product.module';
 import { TicketModule } from './ticket/ticket.module';
 import { BullModule } from '@nestjs/bullmq';
+import { UserModule } from './user/user.module';
+import { AuthModule } from './auth/auth.module';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { RoleGuard } from './auth/guards/roles.guard';
 
 @Module({
   imports: [
@@ -32,8 +37,20 @@ import { BullModule } from '@nestjs/bullmq';
     PaymentModule,
     ProductModule,
     TicketModule,
+    AuthModule,
+    UserModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RoleGuard,
+    },
+  ],
 })
 export class AppModule {}

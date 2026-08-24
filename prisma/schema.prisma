@@ -14,17 +14,26 @@ datasource db {
 
 // 계정의 시스템상 역할일 뿐, 매장 소유 관계는 Shop.ownerId로만 판단한다.
 // MANAGER: 특정 매장에 소속되지 않는 전사 고객지원 센터 계정.
-enum UserType {
+enum UserRole {
   USER
   MANAGER
   OWNER
 }
 
+enum OAuthProvider {
+  GOOGLE
+  GITHUB
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  userType UserType @default(USER) @map("user_type")
+  role UserRole @default(USER)
+  password String? // nullable: OAuth 전용 유저는 null, 로컬 로그인 유저는 bcrypt 해시 문자열
+  isActive Boolean @default(true) @map("is_active")
 
+  refreshTokens RefreshToken[]
+  oauthAccounts OAuthAccount[]
   ownedShops ShopOwner[]
   tickets Ticket[]
   orders Order[]
@@ -35,6 +44,36 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("user")
+}
+
+model OAuthAccount {
+  id         String        @id @default(uuid())
+  userId     String        @map("user_id")
+  provider   OAuthProvider
+  providerId String        @map("provider_id") // 프로바이더가 발급한 고유 ID
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, providerId]) // 같은 프로바이더 계정은 중복 연결 불가
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model RefreshToken {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  tokenHash String @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
 }
 
 enum LedgerStatus {
