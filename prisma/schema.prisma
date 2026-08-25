@@ -65,14 +65,14 @@ model OAuthAccount {
 model RefreshToken {
   id String @id @default(uuid())
   userId String @map("user_id")
-  tokenHash String @map("token_hash")
+  jti String @map("jti")
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
-  @@index([tokenHash])
+  @@index([jti])
   @@map("refresh_tokens")
 }
 

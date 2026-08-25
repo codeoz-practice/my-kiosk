@@ -36,7 +36,7 @@ Table oauth_accounts {
 Table refresh_tokens {
   id String [pk]
   userId String [not null]
-  tokenHash String [not null]
+  jti String [not null]
   expiresAt DateTime [not null]
   createdAt DateTime [default: `now()`, not null]
   user user [not null]

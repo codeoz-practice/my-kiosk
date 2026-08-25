@@ -51,32 +51,42 @@ export class UserRepository {
 
   async createRefreshToken(
     userId: string,
-    tokenHash: string,
+    jti: string,
     expiresAt: Date,
   ): Promise<RefreshToken> {
     return await this.prisma.refreshToken.create({
       data: {
         userId,
-        tokenHash,
+        jti,
         expiresAt,
       },
     });
   }
 
-  async findRefreshTokenByHash(tokenHash: string): Promise<RefreshToken> {
-    return await this.prisma.refreshToken.findFirstOrThrow({
+  async findRefreshTokenJti(jti: string): Promise<RefreshToken | null> {
+    return await this.prisma.refreshToken.findFirst({
       where: {
-        tokenHash,
+        jti,
+        expiresAt: { gt: new Date() },
       },
     });
   }
 
-  async deleteRefreshTokenByHash(tokenHash: string): Promise<number> {
+  async deleteRefreshTokenByJti(jti: string): Promise<number> {
     const result = await this.prisma.refreshToken.deleteMany({
       where: {
-        tokenHash,
+        jti,
       },
     });
     return result.count;
+  }
+
+  // 사용자의 모든 리플래시 토큰 삭제(토큰 탈취 의심 사항)
+  async deleteAllRefreshTokenByUserId(userId: string): Promise<void> {
+    await this.prisma.refreshToken.deleteMany({
+      where: {
+        userId,
+      },
+    });
   }
 }

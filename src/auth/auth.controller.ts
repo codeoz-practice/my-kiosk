@@ -30,6 +30,11 @@ export class AuthController {
   @UseGuards(JwtRefreshAuthGuard)
   @Post('refresh')
   async refresh(@CurrentUser() user: JwtValidationResult) {
-    return this.authService.refreshAccessToken(user.userId);
+    return this.authService.refreshAccessToken(user.userId, user.jti);
+  }
+
+  @Post('logout')
+  async logout(@CurrentUser() user: JwtValidationResult) {
+    return await this.authService.logout(user.jti);
   }
 }
