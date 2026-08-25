@@ -18,10 +18,14 @@ export function getAccessExpiresMinutes(configService: ConfigService): number {
  * 현재 시각에서 N일 후의 만료 시각을 계산한다.
  */
 export function getRefreshTokenExpiresIn(configService: ConfigService): Date {
+  const refreshExpiresDays = getRefreshExpiresDays(configService);
+  return new Date(Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000);
+}
+
+export function getRefreshExpiresDays(configService: ConfigService): number {
   const refreshExpiresDays = configService.get<number>(
     'jwt.refreshExpiresDays',
   );
   assertDefined(refreshExpiresDays, 'refresh token 만료일 미설정');
-
-  return new Date(Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000);
+  return refreshExpiresDays;
 }

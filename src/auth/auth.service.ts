@@ -12,6 +12,7 @@ import { UserRole } from '@prisma/client';
 
 import {
   getAccessExpiresMinutes,
+  getRefreshExpiresDays,
   getRefreshTokenExpiresIn,
 } from 'src/common/utils/jwt-config.util';
 
@@ -62,6 +63,7 @@ export class AuthService {
 
   async generateTokens(userId: string, email: string, role: string) {
     const accessExpiresMinutes = getAccessExpiresMinutes(this.configService);
+    const refreshExpiresDays = getRefreshExpiresDays(this.configService);
     const refreshTokenExpiresIn = getRefreshTokenExpiresIn(this.configService);
     const payload = { sub: userId, email, role, jti: randomUUID() };
 
@@ -79,10 +81,10 @@ export class AuthService {
         {
           ...payload,
           type: 'refresh',
-          exp: Math.floor(refreshTokenExpiresIn.getTime() / 1000),
         },
         {
           secret: this.configService.get<string>('jwt.refreshSecret'),
+          expiresIn: `${refreshExpiresDays}d`,
         },
       ),
     ]);
