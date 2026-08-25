@@ -7,10 +7,13 @@ import { ExistingEmailError } from './existing-user.error';
 import { Role } from 'src/auth/enum/role.enum';
 import { RedisService } from 'src/database/redis/redis.service';
 import { RedisKeys } from 'src/database/redis/redis-keys';
+import { ConfigService } from '@nestjs/config';
+import { getAccessExpiresMinutes } from 'src/common/utils/jwt-config.util';
 
 @Injectable()
 export class UserService {
   constructor(
+    private readonly configService: ConfigService,
     private readonly userRepository: UserRepository,
     private readonly redisService: RedisService,
   ) {}
@@ -61,6 +64,9 @@ export class UserService {
     return await this.userRepository.findById(userId);
   }
 
+  /**
+   * "모든 기기에서 로그아웃" 기능
+   */
   async revokeAllSessions(
     actorUserId: string,
     role: Role,
@@ -80,11 +86,16 @@ export class UserService {
     // refresh token DB 에서 사용자 토큰 제거
     await this.userRepository.deleteAllRefreshTokenByUserId(targetUserId);
 
+    const accessExpiresMinutes = getAccessExpiresMinutes(this.configService);
+
     // redis에 블랙 리스트 등록
     // - SET session_revoked:{userId} {revokedAt timestamp}
+    // TTL을 access 토큰 유효기간으로 두는 이유: 그 이후엔 차단 시점 이전에
+    // 발급된 access 토큰이 모두 자연 만료되어 revokedAt 비교가 무의미해짐
     await this.redisService.set(
       RedisKeys.sessionRevoked(targetUserId),
       Date.now(),
+      accessExpiresMinutes * 60,
     );
   }
 }

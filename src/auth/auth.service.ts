@@ -9,7 +9,11 @@ import {
   DomainUnauthorizedError,
 } from 'src/common/errors';
 import { UserRole } from '@prisma/client';
-import { assertDefined } from 'src/common/utils/assert.util';
+
+import {
+  getAccessExpiresMinutes,
+  getRefreshTokenExpiresIn,
+} from 'src/common/utils/jwt-config.util';
 
 @Injectable()
 export class AuthService {
@@ -57,26 +61,20 @@ export class AuthService {
   }
 
   async generateTokens(userId: string, email: string, role: string) {
-    const refreshExpiresDays = this.configService.get<number>(
-      'JWT_REFRESH_EXPIRES_DAYS',
-    );
-    assertDefined(refreshExpiresDays, 'refresh token 만료일 미설정');
-
-    const refreshTokenExpiresIn = new Date(
-      Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000,
-    );
+    const accessExpiresMinutes = getAccessExpiresMinutes(this.configService);
+    const refreshTokenExpiresIn = getRefreshTokenExpiresIn(this.configService);
     const payload = { sub: userId, email, role, jti: randomUUID() };
 
     const [accessToken, refreshToken] = await Promise.all([
-      // Access Token (15분)
+      // Access Token
       this.jwtService.signAsync(
         { ...payload, type: 'access' },
         {
           secret: this.configService.get<string>('JWT_SECRET'),
-          expiresIn: '15m',
+          expiresIn: `${accessExpiresMinutes}m`,
         },
       ),
-      // Refresh Token (7일)
+      // Refresh Token
       this.jwtService.signAsync(
         {
           ...payload,
@@ -100,11 +98,6 @@ export class AuthService {
    * @param userId
    */
   async refreshAccessToken(userId: string, jti: string) {
-    const refreshExpiresDays = this.configService.get<number>(
-      'JWT_REFRESH_EXPIRES_DAYS',
-    );
-    assertDefined(refreshExpiresDays, 'refresh token 만료일 미설정');
-
     const user = await this.userRepository.findById(userId);
     if (!user) throw new DomainNotFoundError('사용자를 찾을 수 없습니다');
 
@@ -121,11 +114,11 @@ export class AuthService {
       );
     }
 
-    const { tokens, jti: newJti } = await this.generateTokens(
-      user.id,
-      user.email,
-      user.role,
-    );
+    const {
+      tokens,
+      jti: newJti,
+      refreshTokenExpiresIn,
+    } = await this.generateTokens(user.id, user.email, user.role);
 
     // 기존 리플래시 토큰 삭제
     await this.userRepository.deleteRefreshTokenByJti(jti);
@@ -134,7 +127,7 @@ export class AuthService {
     await this.userRepository.createRefreshToken(
       user.id,
       newJti,
-      new Date(Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000),
+      refreshTokenExpiresIn,
     );
     return tokens;
   }
