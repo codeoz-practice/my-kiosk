@@ -8,6 +8,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UserModule } from 'src/user/user.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
+import { getAccessExpiresMinutes } from 'src/common/utils/jwt-config.util';
 
 @Module({
   imports: [
@@ -17,7 +18,9 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret'),
-        signOptions: configService.get('jwt.expiresIn'),
+        signOptions: {
+          expiresIn: `${getAccessExpiresMinutes(configService)}m`,
+        },
       }),
     }),
     UserModule,

@@ -70,7 +70,7 @@ export class AuthService {
       this.jwtService.signAsync(
         { ...payload, type: 'access' },
         {
-          secret: this.configService.get<string>('JWT_SECRET'),
+          secret: this.configService.get<string>('jwt.secret'),
           expiresIn: `${accessExpiresMinutes}m`,
         },
       ),
@@ -82,7 +82,7 @@ export class AuthService {
           exp: Math.floor(refreshTokenExpiresIn.getTime() / 1000),
         },
         {
-          secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+          secret: this.configService.get<string>('jwt.refreshSecret'),
         },
       ),
     ]);

@@ -18,7 +18,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET') || 'your-secret-key',
+      // JWT_SECRET은 validation.schema.ts에서 필수(required)로 검증되므로
+      // 앱 기동을 통과했다면 반드시 존재한다.
+      secretOrKey: configService.get<string>('jwt.secret')!,
     });
   }
 

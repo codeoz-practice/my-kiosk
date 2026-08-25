@@ -32,9 +32,9 @@ export class RedisModule implements OnModuleDestroy {
       provide: REDIS_CLIENT,
       useFactory: (configService: ConfigService) => {
         const redis = new Redis({
-          host: configService.get<string>('REDIS_HOST'),
-          port: configService.get<number>('REDIS_PORT'),
-          password: configService.get<string>('REDIS_PASSWORD') || undefined,
+          host: configService.get<string>('database.redis.host'),
+          port: configService.get<number>('database.redis.port'),
+          password: configService.get<string>('database.redis.password'),
           retryStrategy: (times: number) => {
             // 재연결 전략: 최대 10번 시도, 각 시도마다 1초씩 증가
             if (times > 10) {
