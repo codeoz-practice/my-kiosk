@@ -6,10 +6,15 @@ import {
   JwtPayload,
   JwtValidationResult,
 } from '../interfaces/jwt-payload.interface';
+import { RedisService } from 'src/database/redis/redis.service';
+import { RedisKeys } from 'src/database/redis/redis-keys';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -17,7 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  validate(payload: JwtPayload): JwtValidationResult {
+  async validate(payload: JwtPayload): Promise<JwtValidationResult> {
     if (payload.type && payload.type !== 'access') {
       throw new UnauthorizedException('유효하지 않은 토큰 타입입니다');
     }
@@ -27,9 +32,19 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       !payload.email ||
       !payload.role ||
       !payload.exp ||
-      !payload.jti
+      !payload.jti ||
+      !payload.iat
     ) {
       throw new UnauthorizedException('토큰 필수 정보가 누락되었습니다');
+    }
+
+    const revokedAt = await this.redisService.get(
+      RedisKeys.sessionRevoked(payload.sub),
+    );
+
+    // 세션 취소 이전 발급된 토큰은 연결을 제한한다
+    if (this.isRevokedToken(payload.iat, revokedAt)) {
+      throw new UnauthorizedException('유효하지 않은 토큰입니다');
     }
 
     return {
@@ -39,5 +54,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jti: payload.jti,
       exp: payload.exp,
     };
+  }
+
+  /**
+   * 토큰 발급 시간이 세션 취소 시간보다 이전인지 확인한다.
+   * @param iat 토큰 발급 시간 (Unix timestamp, 초)
+   * @param revokedAt Redis에 기록된 세션 취소 시간 (ms 문자열), 없으면 null
+   * @returns 취소된 토큰이면 true
+   */
+  isRevokedToken(iat: number, revokedAt: string | null) {
+    if (!revokedAt) return false;
+    return iat * 1000 < Number(revokedAt);
   }
 }

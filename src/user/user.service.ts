@@ -4,10 +4,16 @@ import { UserRepository } from './user.repository';
 import * as bcrypt from 'bcrypt';
 import { DomainUnauthorizedError } from 'src/common/errors';
 import { ExistingEmailError } from './existing-user.error';
+import { Role } from 'src/auth/enum/role.enum';
+import { RedisService } from 'src/database/redis/redis.service';
+import { RedisKeys } from 'src/database/redis/redis-keys';
 
 @Injectable()
 export class UserService {
-  constructor(private readonly userRepository: UserRepository) {}
+  constructor(
+    private readonly userRepository: UserRepository,
+    private readonly redisService: RedisService,
+  ) {}
 
   /**
    * 회원 가입
@@ -53,5 +59,32 @@ export class UserService {
 
   async getUserById(userId: string) {
     return await this.userRepository.findById(userId);
+  }
+
+  async revokeAllSessions(
+    actorUserId: string,
+    role: Role,
+    targetUserId: string,
+  ) {
+    // 일반 사용자는 본인의 세션만 초기화 가능
+    if (role === Role.USER && actorUserId !== targetUserId) {
+      throw new DomainUnauthorizedError('권한이 없는 작업 시도');
+    }
+
+    // OWNER는 특정 매장에 소속된 계정이라 타인의 세션을 강제 종료할 권한이 없다.
+    // 매장 소속 유저에 대한 조치는 매장 단위 인가(ShopBan)로 별도 처리한다.
+    if (role === Role.OWNER && actorUserId !== targetUserId) {
+      throw new DomainUnauthorizedError('권한이 없는 작업 시도');
+    }
+
+    // refresh token DB 에서 사용자 토큰 제거
+    await this.userRepository.deleteAllRefreshTokenByUserId(targetUserId);
+
+    // redis에 블랙 리스트 등록
+    // - SET session_revoked:{userId} {revokedAt timestamp}
+    await this.redisService.set(
+      RedisKeys.sessionRevoked(targetUserId),
+      Date.now(),
+    );
   }
 }
