@@ -1,12 +1,18 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true, // Winston 준비 전 발생하는 초기 로그 손실 방지
+  });
+
+  // NestJS 기본 로거를 Winston으로 교체
+  app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 
   // Swagger 설정
   const config = new DocumentBuilder()

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { WinstonModule } from 'nest-winston';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +20,8 @@ import { RoleGuard } from './auth/guards/roles.guard';
 import { RedisModule } from './database/redis/redis.module';
 import configuration from './config/configuration';
 import { validationSchema } from './config/validation.schema';
+import { winstonConfig } from './logger/logger.config';
+import { LoggerModule } from './logger/logger.module';
 
 @Module({
   imports: [
@@ -32,6 +35,8 @@ import { validationSchema } from './config/validation.schema';
         abortEarly: false, // 오류 전체 수집 후 보고
       },
     }), // .env 로드 — 반드시 가장 앞에
+    WinstonModule.forRoot(winstonConfig), // Winston 전역 로거
+    LoggerModule, // 커스텀 로거 서비스 (거래 로그 등)
     RedisModule.forRoot(),
     BullModule.forRootAsync({
       inject: [ConfigService],
