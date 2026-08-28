@@ -7,11 +7,12 @@ import { UsageSessionService } from './usage-session.service';
 import { TicketModule } from 'src/ticket/ticket.module';
 
 @Module({
-  imports: [
-    TicketModule,
-    BullModule.registerQueue({ name: 'usage-session' }),
+  imports: [TicketModule, BullModule.registerQueue({ name: 'usage-session' })],
+  providers: [
+    UsageSessionRepository,
+    UsageSessionService,
+    UsageSessionProcessor,
   ],
-  providers: [UsageSessionRepository, UsageSessionService, UsageSessionProcessor],
   controllers: [UsageSessionController],
   exports: [UsageSessionRepository],
 })

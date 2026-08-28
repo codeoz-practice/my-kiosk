@@ -90,7 +90,7 @@ export class TicketService {
         status: ticket.status,
         activationDeadline: ticket.activationDeadline!, // 유효일
         activatedAt: ticket.activatedAt!,
-        expiresAt: ticket.expiresAt!, // 만료일
+        expiresAt: ticket.expiresAt, // 만료일
         pausedAt: ticket.pauses[0]?.pausedAt,
         remainingDays: this.calcRemainingDays(ticket.expiresAt),
         seatNumber: ticket.usageSessions[0]?.seat.number,
@@ -114,7 +114,9 @@ export class TicketService {
         lastExitedAt: ticket.usageSessions[0]?.endedAt,
       } as TimeTicketOutData;
     } else {
+      // eslint-disable-next-line @typescript-eslint/naming-convention
       const _exhaustive: never = ticket.type;
+      // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
       throw new Error(`처리되지 않은 TicketType: ${_exhaustive}`);
     }
   }

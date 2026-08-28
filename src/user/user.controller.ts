@@ -24,6 +24,10 @@ export class UserController {
     @CurrentUser() actor: JwtValidationResult,
     @Param('userId') targetUserId: string,
   ) {
-    await this.userService.revokeAllSessions(actor.userId, actor.role as Role, targetUserId);
+    await this.userService.revokeAllSessions(
+      actor.userId,
+      actor.role as Role,
+      targetUserId,
+    );
   }
 }

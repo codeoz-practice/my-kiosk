@@ -1,4 +1,11 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { Response, Request } from 'express';
 import { ErrorDetail } from '../dto/error-response.dto';
 import { Prisma } from '@prisma/client';
@@ -80,7 +87,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const logMessage = `${request.method} ${request.path} ${status}`;
     if (status >= 500) {
-      this.logger.error(logMessage, exception instanceof Error ? exception.stack : String(exception));
+      this.logger.error(
+        logMessage,
+        exception instanceof Error ? exception.stack : String(exception),
+      );
     } else {
       this.logger.warn(logMessage, errorDetail.message);
     }

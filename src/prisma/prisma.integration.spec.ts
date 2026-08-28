@@ -20,8 +20,9 @@ describe('PrismaService 연결 테스트', () => {
   });
 
   it('DB에 연결할 수 있다', async () => {
-    const result =
-      await prisma.$queryRaw<[{ result: number }]>`SELECT 1 AS result`;
+    const result = await prisma.$queryRaw<
+      [{ result: number }]
+    >`SELECT 1 AS result`;
     expect(result[0].result).toBe(1);
   });
 });

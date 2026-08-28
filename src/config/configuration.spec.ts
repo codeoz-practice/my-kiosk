@@ -34,9 +34,7 @@ describe('configuration', () => {
   describe('database 섹션', () => {
     it('DATABASE_URL이 설정된 경우 해당 값을 반환한다', () => {
       process.env.DATABASE_URL = 'postgresql://test';
-      expect(configuration().database.postgres.url).toBe(
-        'postgresql://test',
-      );
+      expect(configuration().database.postgres.url).toBe('postgresql://test');
     });
 
     it('REDIS_HOST 미설정 시 localhost를 기본값으로 반환한다', () => {

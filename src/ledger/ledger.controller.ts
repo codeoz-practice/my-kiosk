@@ -8,7 +8,7 @@ import { LedgerQueryService } from './query/ledger-query.service';
 export class LedgerController {
   constructor(
     private readonly commandService: LedgerCommandService,
-    private readonly queryService: LedgerQueryService
+    private readonly queryService: LedgerQueryService,
   ) {}
 
   @Post(':id/settle')
@@ -17,7 +17,9 @@ export class LedgerController {
   }
 
   @Get('seller/:sellerId/dashboard')
-  async getDashboard(@Param('sellerId') sellerId: string): Promise<SellerDashboardDto> {
+  async getDashboard(
+    @Param('sellerId') sellerId: string,
+  ): Promise<SellerDashboardDto> {
     return this.queryService.getSellerDashboard(sellerId);
   }
 }

@@ -52,9 +52,9 @@ describe('validationSchema', () => {
         { abortEarly: false },
       );
       expect(error).toBeDefined();
-      expect(
-        error?.details.some((d) => d.path.includes('DATABASE_URL')),
-      ).toBe(true);
+      expect(error?.details.some((d) => d.path.includes('DATABASE_URL'))).toBe(
+        true,
+      );
     });
 
     it('JWT_SECRET 누락 시 오류를 반환한다', () => {

@@ -1,4 +1,9 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Request, Response as ExpressResponse } from 'express';
 import { Response } from '../types/response.types';
 import { map, Observable } from 'rxjs';
@@ -21,7 +26,7 @@ export class TransformInterceptor<T> implements NestInterceptor<
         if (data && typeof data === 'object' && 'success' in data) {
           return data;
         }
-        
+
         return {
           success: true,
           statusCode,
@@ -29,7 +34,7 @@ export class TransformInterceptor<T> implements NestInterceptor<
           timestamp: new Date().toISOString(),
           path: request.path,
         };
-      })
+      }),
     );
   }
 }

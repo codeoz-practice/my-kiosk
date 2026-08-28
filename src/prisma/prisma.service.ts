@@ -109,7 +109,12 @@ export class PrismaService
     operations: (
       prisma: Omit<
         PrismaClient,
-        '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+        | '$connect'
+        | '$disconnect'
+        | '$on'
+        | '$transaction'
+        | '$use'
+        | '$extends'
       >,
     ) => Promise<T>,
   ): Promise<T> {

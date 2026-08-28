@@ -9,7 +9,7 @@ import { IsOptional, IsString, IsUUID } from 'class-validator';
 // }
 
 export class SettleLedgerParamDto {
-  @ApiProperty({description: '정산할 Ledger ID'})
+  @ApiProperty({ description: '정산할 Ledger ID' })
   @IsUUID('4')
   id: string;
 }
