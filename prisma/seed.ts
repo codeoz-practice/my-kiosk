@@ -270,7 +270,9 @@ async function seedProducts() {
     ],
   });
 
-  console.log('Product(6, 활성/비활성/소프트삭제) + ProductHistory(3) 생성 완료');
+  console.log(
+    'Product(6, 활성/비활성/소프트삭제) + ProductHistory(3) 생성 완료',
+  );
 }
 
 // ─────────────────────────────────────────────────────────
@@ -296,8 +298,14 @@ async function createOrderWithRelations(params: {
   paymentReason?: string;
   createdAt?: Date;
 }) {
-  const originalPrice = params.items.reduce((sum, item) => sum + item.originalPrice, 0);
-  const discountAmount = params.items.reduce((sum, item) => sum + item.discountAmount, 0);
+  const originalPrice = params.items.reduce(
+    (sum, item) => sum + item.originalPrice,
+    0,
+  );
+  const discountAmount = params.items.reduce(
+    (sum, item) => sum + item.discountAmount,
+    0,
+  );
   const totalAmount = originalPrice - discountAmount;
   const orderCreatedAt = params.createdAt ?? now;
 
@@ -333,10 +341,10 @@ async function createOrderWithRelations(params: {
     }
 
     // 결제 상태별 요청/승인/취소 시각 및 사유
-    const isRequested =
-      params.paymentStatus !== PaymentStatus.PENDING;
+    const isRequested = params.paymentStatus !== PaymentStatus.PENDING;
     const isApproved = params.paymentStatus === PaymentStatus.SUCCESS;
-    const isTerminalCancelled = params.paymentStatus === PaymentStatus.CANCELLED;
+    const isTerminalCancelled =
+      params.paymentStatus === PaymentStatus.CANCELLED;
 
     const payment = await tx.payment.create({
       data: {
@@ -345,9 +353,14 @@ async function createOrderWithRelations(params: {
         status: params.paymentStatus,
         price: totalAmount,
         van: params.paymentType === PaymentType.CARD ? 'NICE' : undefined,
-        pgTransactionId: isRequested || isTerminalCancelled ? `PG-${order.id.slice(0, 8)}` : undefined,
-        requestedAt: isRequested || isTerminalCancelled ? orderCreatedAt : undefined,
-        approvedAt: isApproved || isTerminalCancelled ? orderCreatedAt : undefined,
+        pgTransactionId:
+          isRequested || isTerminalCancelled
+            ? `PG-${order.id.slice(0, 8)}`
+            : undefined,
+        requestedAt:
+          isRequested || isTerminalCancelled ? orderCreatedAt : undefined,
+        approvedAt:
+          isApproved || isTerminalCancelled ? orderCreatedAt : undefined,
         reason: params.paymentReason,
         createdAt: orderCreatedAt,
       },
@@ -371,8 +384,12 @@ async function createOrderWithRelations(params: {
               ? addDays(orderCreatedAt, item.usableDays)
               : undefined,
             remainingMinutes: isTimeType ? item.purchasedMinutes : undefined,
-            purchasedDurationDays: !isTimeType ? item.purchasedDurationDays : undefined,
-            activationDeadline: !isTimeType ? addDays(orderCreatedAt, item.usableDays) : undefined,
+            purchasedDurationDays: !isTimeType
+              ? item.purchasedDurationDays
+              : undefined,
+            activationDeadline: !isTimeType
+              ? addDays(orderCreatedAt, item.usableDays)
+              : undefined,
             createdAt: orderCreatedAt,
           },
         });
@@ -405,8 +422,14 @@ async function createOrderWithMultiplePayments(params: {
   payments: PaymentAttemptInput[];
   createdAt?: Date;
 }) {
-  const originalPrice = params.items.reduce((sum, item) => sum + item.originalPrice, 0);
-  const discountAmount = params.items.reduce((sum, item) => sum + item.discountAmount, 0);
+  const originalPrice = params.items.reduce(
+    (sum, item) => sum + item.originalPrice,
+    0,
+  );
+  const discountAmount = params.items.reduce(
+    (sum, item) => sum + item.discountAmount,
+    0,
+  );
   const totalAmount = originalPrice - discountAmount;
   const orderCreatedAt = params.createdAt ?? now;
 
@@ -447,7 +470,10 @@ async function createOrderWithMultiplePayments(params: {
     let hasSucceeded = false;
     for (let i = 0; i < params.payments.length; i++) {
       const attempt = params.payments[i];
-      const attemptAt = addMinutes(orderCreatedAt, attempt.attemptOffsetMinutes ?? i * 5);
+      const attemptAt = addMinutes(
+        orderCreatedAt,
+        attempt.attemptOffsetMinutes ?? i * 5,
+      );
       const isRequested = attempt.status !== PaymentStatus.PENDING;
       const isApprovedOne = attempt.status === PaymentStatus.SUCCESS;
       const isTerminalCancelled = attempt.status === PaymentStatus.CANCELLED;
@@ -461,9 +487,13 @@ async function createOrderWithMultiplePayments(params: {
           van: attempt.type === PaymentType.CARD ? 'KCP' : undefined,
           // 한 주문에 여러 결제가 붙으므로 pgTransactionId 충돌 방지를 위해 시도 순번을 접미사로 붙인다
           pgTransactionId:
-            isRequested || isTerminalCancelled ? `PG-${order.id.slice(0, 8)}-${i + 1}` : undefined,
-          requestedAt: isRequested || isTerminalCancelled ? attemptAt : undefined,
-          approvedAt: isApprovedOne || isTerminalCancelled ? attemptAt : undefined,
+            isRequested || isTerminalCancelled
+              ? `PG-${order.id.slice(0, 8)}-${i + 1}`
+              : undefined,
+          requestedAt:
+            isRequested || isTerminalCancelled ? attemptAt : undefined,
+          approvedAt:
+            isApprovedOne || isTerminalCancelled ? attemptAt : undefined,
           reason: attempt.reason,
           createdAt: attemptAt,
         },
@@ -490,8 +520,12 @@ async function createOrderWithMultiplePayments(params: {
               ? addDays(orderCreatedAt, item.usableDays)
               : undefined,
             remainingMinutes: isTimeType ? item.purchasedMinutes : undefined,
-            purchasedDurationDays: !isTimeType ? item.purchasedDurationDays : undefined,
-            activationDeadline: !isTimeType ? addDays(orderCreatedAt, item.usableDays) : undefined,
+            purchasedDurationDays: !isTimeType
+              ? item.purchasedDurationDays
+              : undefined,
+            activationDeadline: !isTimeType
+              ? addDays(orderCreatedAt, item.usableDays)
+              : undefined,
             createdAt: orderCreatedAt,
           },
         });
@@ -516,8 +550,14 @@ async function createOrderWithoutPayment(params: {
   items: OrderItemInput[];
   createdAt?: Date;
 }) {
-  const originalPrice = params.items.reduce((sum, item) => sum + item.originalPrice, 0);
-  const discountAmount = params.items.reduce((sum, item) => sum + item.discountAmount, 0);
+  const originalPrice = params.items.reduce(
+    (sum, item) => sum + item.originalPrice,
+    0,
+  );
+  const discountAmount = params.items.reduce(
+    (sum, item) => sum + item.discountAmount,
+    0,
+  );
   const totalAmount = originalPrice - discountAmount;
   const orderCreatedAt = params.createdAt ?? now;
 
@@ -585,17 +625,21 @@ async function createPaymentCancel(params: {
         amount: totalAmount,
         reason: params.reason,
         status: params.status,
-        failureReason: params.status === PaymentCancelStatus.FAILED ? params.failureReason : undefined,
+        failureReason:
+          params.status === PaymentCancelStatus.FAILED
+            ? params.failureReason
+            : undefined,
         pgTransactionId: isFinal
           ? `PGCANCEL-${params.paymentId.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}`
           : undefined,
         requestedAt,
         cancelledAt: isFinal ? addMinutes(requestedAt, 1) : undefined,
-        createdAt: requestedAt,
       },
     });
 
-    const cancelItems: Awaited<ReturnType<typeof tx.paymentCancelItem.create>>[] = [];
+    const cancelItems: Awaited<
+      ReturnType<typeof tx.paymentCancelItem.create>
+    >[] = [];
     for (const item of params.items) {
       const cancelItem = await tx.paymentCancelItem.create({
         data: {
