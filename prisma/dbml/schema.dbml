@@ -91,7 +91,7 @@ Table products {
   id String [pk]
   name String [not null]
   ticketType TicketType [not null]
-  price Int [not null]
+  amount Int [not null]
   shopId String [not null]
   usableDays Int [not null]
   isActive Boolean [not null, default: true]
@@ -109,7 +109,7 @@ Table orders {
   id String [pk]
   shopId String [not null]
   userId String [not null]
-  originalPrice Int [not null]
+  originalAmount Int [not null]
   discountAmount Int [not null, default: 0]
   totalAmount Int [not null]
   orderItems order_items [not null]
@@ -123,9 +123,9 @@ Table orders {
 Table order_items {
   id String [pk]
   ticketType TicketType [not null]
-  originalPrice Int [not null]
+  originalAmount Int [not null]
   discountAmount Int [not null]
-  price Int [not null]
+  amount Int [not null]
   purchasedMinutes Int
   purchasedDurationDays Int
   usableDays Int [not null]
@@ -134,7 +134,7 @@ Table order_items {
   ticket tickets
   product products [not null]
   order orders [not null]
-  cancelItems payment_cancel_items [not null]
+  paymentCancelItem payment_cancel_items [not null]
   refundLock refund_locks
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
@@ -145,7 +145,7 @@ Table payments {
   type PaymentType [not null]
   status PaymentStatus [not null, default: 'PENDING']
   orderId String [not null]
-  price Int [not null]
+  amount Int [not null]
   van VanType
   pgTransactionId String [unique]
   requestedAt DateTime
@@ -154,7 +154,7 @@ Table payments {
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
   reason String
-  cancels payment_cancels [not null]
+  paymentCancels payment_cancels [not null]
 }
 
 Table payment_cancels {
@@ -163,13 +163,15 @@ Table payment_cancels {
   amount Int [not null]
   reason String
   status PaymentCancelStatus [not null, default: 'REQUESTED']
+  pgErrorCode String
+  failureCode PaymentCancelFailureCode
   failureReason String
   pgTransactionId String [unique]
   requestedAt DateTime [not null]
   cancelledAt DateTime
   failedAt DateTime
   payment payments [not null]
-  items payment_cancel_items [not null]
+  paymentCancelItem payment_cancel_items [not null]
   locks refund_locks [not null]
 }
 
@@ -322,6 +324,11 @@ Enum PaymentCancelStatus {
   REQUESTED
   SUCCEEDED
   FAILED
+}
+
+Enum PaymentCancelFailureCode {
+  AMOUNT_MISMATCH
+  PG_NOT_REACHED
 }
 
 Enum UsageSessionStatus {

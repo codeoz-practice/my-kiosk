@@ -180,7 +180,7 @@ model Product {
   id String @id @default(uuid())
   name String
   ticketType TicketType @map("ticket_type")
-  price Int // 금액
+  amount Int // 금액
   shopId String @map("shop_id")
 
   usableDays Int @map("usable_days") // 공통 - 구매 후 며칠 안에 사용/활성화해야 하는 상품인가
@@ -206,7 +206,7 @@ model Order {
   shopId String @map("shop_id")
   userId String @map("user_id")
   
-  originalPrice   Int @map("original_price")  // 할인 전 금액
+  originalAmount  Int @map("original_amount")  // 할인 전 금액
   discountAmount  Int @default(0) @map("discount_amount") // 할인 금액
   totalAmount     Int @map("total_amount")    // 실결제 금액
 
@@ -226,9 +226,9 @@ model Order {
 model OrderItem {
   id String @id @default(uuid())
   ticketType TicketType @map("ticket_type") // 구매 시점 티켓 타입
-  originalPrice Int @map("original_price")// 구매 시점 가격 스냅샷
+  originalAmount Int @map("original_amount")// 구매 시점 가격 스냅샷
   discountAmount Int @map("discount_amount") // 항목 할인액
-  price Int // 실결제 금액 스냅샷(originalPrice - discountAmount)
+  amount Int // 실결제 금액 스냅샷(originalAmount - discountAmount)
   purchasedMinutes Int? @map("purchased_minutes") // 시간권: 구매 시점 분 스냅샷
   purchasedDurationDays Int? @map("purchased_duration_days") // 정기권: 구매 시점 기간 스냅샷
   usableDays Int @map("usable_days") // 구매 시점 활성화/소진 기한 스냅샷(티켓 생성 시 기한 계산에 사용)
@@ -238,7 +238,7 @@ model OrderItem {
   ticket Ticket?
   product Product @relation(fields: [productId], references: [id])
   order Order @relation(fields: [orderId], references: [id])
-  cancelItems PaymentCancelItem[] // 이 상품에 대한 취소 내역(잔여 사용량 비례 부분 취소 시 여러 건 가능)
+  paymentCancelItem PaymentCancelItem[] // 이 상품에 대한 취소 내역(잔여 사용량 비례 부분 취소 시 여러 건 가능)
   refundLock RefundLock? // 이 상품에 대해 현재 진행 중인 환불이 있으면 존재(동시 중복 진행 방지용 락)
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -270,7 +270,7 @@ model Payment {
   type PaymentType // 결재 타입(카드, 현금)
   status PaymentStatus @default(PENDING)
   orderId String @map("order_id")
-  price Int   // 결재 금액
+  amount Int   // 결재 금액
   van VanType? // 카드 대행사
   pgTransactionId String? @unique // 거래 고유 ID (요청 응답으로 수신)
   requestedAt DateTime? @map("requested_at") // 결재 승인 요청 시각
@@ -282,7 +282,7 @@ model Payment {
   updatedAt DateTime @updatedAt @map("updated_at")
   reason String? // 결재 실패 시 이유
 
-  cancels PaymentCancel[]
+  paymentCancels PaymentCancel[]
 
   @@index([orderId])
   @@map("payments")
@@ -294,6 +294,12 @@ enum PaymentCancelStatus {
   FAILED    // PG가 취소를 확정적으로 거절
 }
 
+// 우리 시스템이 자체 판단한 실패 원인 분류 - PG가 알려주지 않는 사유(pgErrorCode로 표현 불가)를 코드로 필터링하기 위한 용도
+enum PaymentCancelFailureCode {
+  AMOUNT_MISMATCH // PG 응답 금액이 요청 금액과 다름(PG는 성공으로 응답했으나 우리가 실패로 재판정)
+  PG_NOT_REACHED  // 락 만료 후 PG 거래조회 결과 "거래 없음" - 요청이 PG에 도달하지 않은 것으로 판단
+}
+
 // PG에 대한 취소 실행 1건"에 대한 정보 모델 (PG사에 요청 실행)
 model PaymentCancel {
   id        String   @id @default(uuid())
@@ -301,18 +307,22 @@ model PaymentCancel {
   amount    Int                           // 취소 금액 (부분 취소 가능)
   reason    String?                       // 취소 사유(고객이 취소를 요청한 이유)
   status    PaymentCancelStatus @default(REQUESTED)
-  failureReason String? @map("failure_reason") // 확정 실패 시 PG 응답 사유 상세
+  pgErrorCode String? @map("pg_error_code") // PG가 응답한 원본 에러 코드(PG가 거절한 경우)
+  failureCode PaymentCancelFailureCode? @map("failure_code") // 우리 시스템이 자체 판단한 실패 원인 분류(코드 조회용)
+  failureReason String? @map("failure_reason") // 확정 실패 시 사유 상세(사람이 읽는 설명)
   pgTransactionId String? @unique @map("pg_transaction_id") // PG사 취소 거래 ID (취소 요청 응답으로 수신)
   requestedAt  DateTime  @map("requested_at")  // 취소 요청 시각
   cancelledAt  DateTime? @map("cancelled_at")  // 취소 완료 시각
   failedAt DateTime? @updatedAt @map("failed_at")
 
   payment Payment @relation(fields: [paymentId], references: [id])
-  items PaymentCancelItem[] // 이 취소 요청에 포함된 상품별 내역
+  paymentCancelItem PaymentCancelItem[] // 이 취소 요청에 포함된 상품별 내역
   locks RefundLock[] // 이 취소 요청이 보유 중인 상품별 락(확정되면 삭제됨)
 
   @@index([paymentId])
   @@index([status])
+  @@index([pgErrorCode])
+  @@index([failureCode])
   @@map("payment_cancels")
 }
 
