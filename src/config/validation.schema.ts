@@ -26,4 +26,7 @@ export const validationSchema = Joi.object({
   JWT_ACCESS_EXPIRES_MINUTES: Joi.number().default(15),
   JWT_REFRESH_SECRET: Joi.string().required(),
   JWT_REFRESH_EXPIRES_DAYS: Joi.number().default(7),
+
+  // Idempotency
+  IDEMPOTENCY_KEY_TTL_SECONDS: Joi.number().default(600), // 기본값 10분
 });

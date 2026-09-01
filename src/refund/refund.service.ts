@@ -64,7 +64,7 @@ export class RefundService {
           new Date(Date.now() + pgInquiryLockTtlMs),
           tx,
         );
-        // 연장된 행이 없으면 그 사이 다른 트랜잭션이 이미 처리(삭제)한 것 - 물러난다.
+        // 연장된 행이 없으면 그 사이 다른 트랜잭션이 이미 처리(삭제)한 것
         if (extendedCount === 0) {
           throw new DomainConflictError('환불 진행 중인 상품입니다');
         }

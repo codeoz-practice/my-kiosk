@@ -51,4 +51,12 @@ export default () => ({
       10,
     ),
   },
+
+  // 멱등성 설정
+  idempotency: {
+    keyTtlSeconds: parseInt(
+      process.env.IDEMPOTENCY_KEY_TTL_SECONDS || '600',
+      10,
+    ),
+  },
 });

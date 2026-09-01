@@ -1,19 +1,29 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseInterceptors,
+} from '@nestjs/common';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import type { JwtValidationResult } from 'src/auth/interfaces/jwt-payload.interface';
 import { RefundService } from './refund.service';
 import { GetRefundQueryDto, RefundDto, PgRefundCallbackDto } from './dto';
+import { IdempotencyInterceptor } from 'src/common/interceptors/idempotency.interceptor';
 
 @Controller('refund')
 export class RefundController {
   constructor(private readonly refundService: RefundService) {}
 
   @Post()
+  @UseInterceptors(IdempotencyInterceptor)
   async refund(
     @CurrentUser() user: JwtValidationResult,
     @Body() dto: RefundDto,
   ) {
-    await this.refundService.refund(
+    return await this.refundService.refund(
       user.userId,
       dto.ticketId,
       dto.refundAmount,

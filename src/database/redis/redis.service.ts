@@ -34,6 +34,28 @@ export class RedisService {
     }
   }
 
+  /**
+   * 키가 존재하지 않을 때만 값을 설정한다. (원자적 연산, SET NX)
+   * 동시에 여러 요청이 같은 키를 선점하려 할 때 단 하나만 성공하도록 보장한다.
+   * @returns 설정에 성공하면 true, 이미 키가 존재해 설정하지 못하면 false
+   */
+  async setIfNotExists(
+    key: string,
+    value: any,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const stringValue =
+      typeof value === 'string' ? value : JSON.stringify(value);
+    const result = await this.redis.set(
+      key,
+      stringValue,
+      'EX',
+      ttlSeconds,
+      'NX',
+    );
+    return result === 'OK';
+  }
+
   async get<T = any>(key: string): Promise<T | null> {
     const value = await this.redis.get(key);
     // !value 금지: 빈 문자열 '' 도 null로 처리되어 데이터 손실 발생
