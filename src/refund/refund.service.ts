@@ -15,6 +15,9 @@ import { TransactionLoggerService } from '../logger/transaction-logger.service';
 import { PgService } from 'src/pg/pg.service';
 import { PgCancelInquiryResult } from 'src/pg/pg.types';
 
+// 만료된 락을 PG 조회하는 동안 선점(연장)해두는 시간 - 조회 타임아웃 예상치보다 여유 있게 설정
+const pgInquiryLockTtlMs = 30 * 1000;
+
 @Injectable()
 export class RefundService {
   constructor(
@@ -42,7 +45,8 @@ export class RefundService {
       throw new DomainNotFoundError('결재 정보가 존재하지 않습니다');
     }
 
-    // 1차 트랜잭션: 락 상태만 확인. 만료된 락이 있으면 아직 아무것도 변경하지 않고 정보만 확보한다.
+    // 1차 트랜잭션: 락 상태 확인. 만료된 락이 있으면, PG 조회를 진행하는 동안
+    // 다른 요청이 같은 만료 락을 보고 중복으로 조회를 시작하지 못하도록 즉시 선점(연장)한다.
     const staleLock = await this.refundRepository.runInTransaction(
       async (tx) => {
         const refundLock = await this.refundRepository.getRefundLock(
@@ -53,6 +57,18 @@ export class RefundService {
         if (refundLock.expiresAt > new Date()) {
           throw new DomainConflictError('환불 진행 중인 상품입니다');
         }
+
+        const extendedCount = await this.refundRepository.extendRefundLock(
+          ticket.orderItem.id,
+          refundLock.paymentCancelId,
+          new Date(Date.now() + pgInquiryLockTtlMs),
+          tx,
+        );
+        // 연장된 행이 없으면 그 사이 다른 트랜잭션이 이미 처리(삭제)한 것 - 물러난다.
+        if (extendedCount === 0) {
+          throw new DomainConflictError('환불 진행 중인 상품입니다');
+        }
+
         return refundLock;
       },
     );
@@ -187,11 +203,12 @@ export class RefundService {
         orderItemId,
         tx,
       );
-      // 그 사이 다른 요청이 이미 처리했거나 락 상태가 바뀌었으면 물러난다.
+      // 1차 트랜잭션에서 이 요청이 선점(연장)해둔 락인지 확인한다. paymentCancelId가
+      // 다르면 그 사이 다른 요청이 이미 처리를 끝내고 새 락을 잡은 것 - 물러난다.
+      // (연장으로 인해 만료 시각은 항상 미래이므로 만료 여부 비교는 더 이상 의미가 없다.)
       if (
         !currentLock ||
-        currentLock.paymentCancelId !== staleLock.paymentCancelId ||
-        currentLock.expiresAt > new Date()
+        currentLock.paymentCancelId !== staleLock.paymentCancelId
       ) {
         throw new DomainConflictError('환불 진행 중인 상품입니다');
       }

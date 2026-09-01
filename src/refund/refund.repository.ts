@@ -100,6 +100,28 @@ export class RefundRepository {
     });
   }
 
+  // 만료된 락을 PG 조회 동안 선점하기 위해 만료 시각을 연장한다.
+  // updateMany + paymentCancelId 소유권 조건 - 그 사이 다른 트랜잭션이 이미
+  // 이 락을 처리(삭제)했다면 대상이 없어 0건으로 조용히 끝난다(에러 없음).
+  // 반환값(연장된 행 수)으로 호출부가 선점 성공 여부를 판단할 수 있다.
+  async extendRefundLock(
+    orderItemId: string,
+    paymentCancelId: string,
+    expiresAt: Date,
+    client: TransactionClient | PrismaService = this.prisma,
+  ): Promise<number> {
+    const { count } = await client.refundLock.updateMany({
+      where: {
+        orderItemId,
+        paymentCancelId,
+      },
+      data: {
+        expiresAt,
+      },
+    });
+    return count;
+  }
+
   // 환불 가능 금액 계산
   async calculateRefundableAmount(
     orderItemId: string,
