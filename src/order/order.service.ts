@@ -30,14 +30,14 @@ export class OrderService {
       id: order.id,
       shopId: order.shopId,
       userId: order.userId,
-      originalPrice: order.originalPrice,
+      originalAmount: order.originalAmount,
       discountAmount: order.discountAmount,
       totalAmount: order.totalAmount,
       orderItems: order.orderItems.map((item) => ({
         productId: item.productId,
-        originalPrice: item.originalPrice,
+        originalAmount: item.originalAmount,
         discountAmount: item.discountAmount,
-        price: item.price,
+        amount: item.amount,
         purchasedMinutes: item.purchasedMinutes,
         purchasedDurationDays: item.purchasedDurationDays,
         ticket: item.ticket
@@ -47,7 +47,7 @@ export class OrderService {
       payments: order.payments.map((payment) => ({
         type: payment.type,
         status: payment.status,
-        price: payment.price,
+        amount: payment.amount,
         approvedAt: payment.approvedAt,
       })),
     };

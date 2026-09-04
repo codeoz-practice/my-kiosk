@@ -6,7 +6,7 @@ export interface OrderOutData {
   id: string;
   shopId: string;
   userId: string;
-  originalPrice: number;
+  originalAmount: number;
   discountAmount: number;
   totalAmount: number;
   orderItems: OrderItemOutData[];

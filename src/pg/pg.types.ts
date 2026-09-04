@@ -3,6 +3,7 @@ export enum PgCancelInquiryResult {
   NOT_FOUND = 'NOT_FOUND', // PG에 해당 취소 거래 없음(요청이 PG에 도달하지 않음)
   SUCCEEDED = 'SUCCEEDED', // PG가 취소를 성공 처리함
   FAILED = 'FAILED', // PG가 취소를 실패 처리함
+  IN_PROGRESS = 'IN_PROGRESS', // PG가 요청을 접수했고 아직 처리 중(PENDING/PROCESSING 등) - 확정 불가, 진행 중으로 취급
 }
 
 export interface PgCancelInquiry {

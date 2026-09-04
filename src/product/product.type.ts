@@ -2,7 +2,7 @@ import { TicketType } from '@prisma/client';
 
 interface BaseProductData {
   name: string;
-  price: number;
+  amount: number;
   // shopId: string;
   usableDays: number;
   isActive: boolean;

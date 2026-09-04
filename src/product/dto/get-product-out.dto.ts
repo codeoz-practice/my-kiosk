@@ -4,7 +4,7 @@ export class GetProductOutDto {
   id!: string;
   name!: string;
   ticketType!: TicketType;
-  price!: number;
+  amount!: number;
   purchasedMinutes?: number | null;
   purchasedDurationDays?: number | null;
   usableDays!: number;

@@ -176,7 +176,7 @@ async function seedProducts() {
         id: PRODUCT.gangnamPeriod30,
         name: '한달 정기권',
         ticketType: TicketType.PERIOD,
-        price: 100000,
+        amount: 100000,
         shopId: SHOP.gangnam,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -186,7 +186,7 @@ async function seedProducts() {
         id: PRODUCT.gangnamTime600,
         name: '10시간 이용권',
         ticketType: TicketType.TIME,
-        price: 50000,
+        amount: 50000,
         shopId: SHOP.gangnam,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -196,7 +196,7 @@ async function seedProducts() {
         id: PRODUCT.hongdaePeriod30,
         name: '한달 정기권',
         ticketType: TicketType.PERIOD,
-        price: 90000,
+        amount: 90000,
         shopId: SHOP.hongdae,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -206,7 +206,7 @@ async function seedProducts() {
         id: PRODUCT.gangnamTime300Inactive,
         name: '5시간 이용권(판매종료)',
         ticketType: TicketType.TIME,
-        price: 30000,
+        amount: 30000,
         shopId: SHOP.gangnam,
         usableDays: 60,
         purchasedMinutes: 300,
@@ -216,7 +216,7 @@ async function seedProducts() {
         id: PRODUCT.gangnamPeriod7Deleted,
         name: '체험 정기권(삭제됨)',
         ticketType: TicketType.PERIOD,
-        price: 20000,
+        amount: 20000,
         shopId: SHOP.gangnam,
         usableDays: 7,
         purchasedDurationDays: 7,
@@ -227,7 +227,7 @@ async function seedProducts() {
         id: PRODUCT.hongdaeTime120,
         name: '2시간 이용권',
         ticketType: TicketType.TIME,
-        price: 12000,
+        amount: 12000,
         shopId: SHOP.hongdae,
         usableDays: 30,
         purchasedMinutes: 120,
@@ -243,7 +243,7 @@ async function seedProducts() {
       {
         changeGroupId,
         productId: PRODUCT.gangnamPeriod30,
-        changedField: 'price',
+        changedField: 'amount',
         oldValue: '90000',
         newValue: '100000',
         changedBy: USER.ownerGangnam,
@@ -282,7 +282,7 @@ async function seedProducts() {
 interface OrderItemInput {
   productId: string;
   ticketType: TicketType;
-  originalPrice: number;
+  originalAmount: number;
   discountAmount: number;
   usableDays: number;
   purchasedMinutes?: number;
@@ -298,15 +298,15 @@ async function createOrderWithRelations(params: {
   paymentReason?: string;
   createdAt?: Date;
 }) {
-  const originalPrice = params.items.reduce(
-    (sum, item) => sum + item.originalPrice,
+  const originalAmount = params.items.reduce(
+    (sum, item) => sum + item.originalAmount,
     0,
   );
   const discountAmount = params.items.reduce(
     (sum, item) => sum + item.discountAmount,
     0,
   );
-  const totalAmount = originalPrice - discountAmount;
+  const totalAmount = originalAmount - discountAmount;
   const orderCreatedAt = params.createdAt ?? now;
 
   return prisma.$transaction(async (tx) => {
@@ -314,7 +314,7 @@ async function createOrderWithRelations(params: {
       data: {
         shopId: params.shopId,
         userId: params.userId,
-        originalPrice,
+        originalAmount,
         discountAmount,
         totalAmount,
         createdAt: orderCreatedAt,
@@ -328,9 +328,9 @@ async function createOrderWithRelations(params: {
           orderId: order.id,
           productId: item.productId,
           ticketType: item.ticketType,
-          originalPrice: item.originalPrice,
+          originalAmount: item.originalAmount,
           discountAmount: item.discountAmount,
-          price: item.originalPrice - item.discountAmount,
+          amount: item.originalAmount - item.discountAmount,
           purchasedMinutes: item.purchasedMinutes,
           purchasedDurationDays: item.purchasedDurationDays,
           usableDays: item.usableDays,
@@ -351,7 +351,7 @@ async function createOrderWithRelations(params: {
         orderId: order.id,
         type: params.paymentType,
         status: params.paymentStatus,
-        price: totalAmount,
+        amount: totalAmount,
         van: params.paymentType === PaymentType.CARD ? 'NICE' : undefined,
         pgTransactionId:
           isRequested || isTerminalCancelled
@@ -412,7 +412,7 @@ interface PaymentAttemptInput {
  * 주문 1건에 결제(Payment) 여러 건이 붙는 시나리오 전용 — Order 1:N Payment 관계.
  * 이 프로젝트에서 한 주문에 결제가 여러 건 남는 유일한 경로는 "실패 후 전액으로 재시도"뿐이다
  * (payment.repository.ts:createPayment()가 PENDING/REQUESTED/SUCCESS 상태 결제가 있으면 새 결제
- * 생성을 막고, price도 항상 order.totalAmount로 고정한다 — FAILED만 재시도를 막지 않는다).
+ * 생성을 막고, amount도 항상 order.totalAmount로 고정한다 — FAILED만 재시도를 막지 않는다).
  * "분할결제(금액을 쪼개 동시 진행)"는 이 서비스에 구현되어 있지 않으므로 여기서 다루지 않는다.
  */
 async function createOrderWithMultiplePayments(params: {
@@ -422,15 +422,15 @@ async function createOrderWithMultiplePayments(params: {
   payments: PaymentAttemptInput[];
   createdAt?: Date;
 }) {
-  const originalPrice = params.items.reduce(
-    (sum, item) => sum + item.originalPrice,
+  const originalAmount = params.items.reduce(
+    (sum, item) => sum + item.originalAmount,
     0,
   );
   const discountAmount = params.items.reduce(
     (sum, item) => sum + item.discountAmount,
     0,
   );
-  const totalAmount = originalPrice - discountAmount;
+  const totalAmount = originalAmount - discountAmount;
   const orderCreatedAt = params.createdAt ?? now;
 
   return prisma.$transaction(async (tx) => {
@@ -438,7 +438,7 @@ async function createOrderWithMultiplePayments(params: {
       data: {
         shopId: params.shopId,
         userId: params.userId,
-        originalPrice,
+        originalAmount,
         discountAmount,
         totalAmount,
         createdAt: orderCreatedAt,
@@ -452,9 +452,9 @@ async function createOrderWithMultiplePayments(params: {
           orderId: order.id,
           productId: item.productId,
           ticketType: item.ticketType,
-          originalPrice: item.originalPrice,
+          originalAmount: item.originalAmount,
           discountAmount: item.discountAmount,
-          price: item.originalPrice - item.discountAmount,
+          amount: item.originalAmount - item.discountAmount,
           purchasedMinutes: item.purchasedMinutes,
           purchasedDurationDays: item.purchasedDurationDays,
           usableDays: item.usableDays,
@@ -464,7 +464,7 @@ async function createOrderWithMultiplePayments(params: {
       orderItems.push(orderItem);
     }
 
-    // 실제 코드(createPayment)와 동일하게 매 시도의 price는 항상 주문 총액 전체로 고정한다
+    // 실제 코드(createPayment)와 동일하게 매 시도의 amount는 항상 주문 총액 전체로 고정한다
     // (부분 금액 결제라는 개념 자체가 서비스 레이어에 존재하지 않는다)
     const payments: Awaited<ReturnType<typeof tx.payment.create>>[] = [];
     let hasSucceeded = false;
@@ -483,7 +483,7 @@ async function createOrderWithMultiplePayments(params: {
           orderId: order.id,
           type: attempt.type,
           status: attempt.status,
-          price: totalAmount,
+          amount: totalAmount,
           van: attempt.type === PaymentType.CARD ? 'KCP' : undefined,
           // 한 주문에 여러 결제가 붙으므로 pgTransactionId 충돌 방지를 위해 시도 순번을 접미사로 붙인다
           pgTransactionId:
@@ -550,15 +550,15 @@ async function createOrderWithoutPayment(params: {
   items: OrderItemInput[];
   createdAt?: Date;
 }) {
-  const originalPrice = params.items.reduce(
-    (sum, item) => sum + item.originalPrice,
+  const originalAmount = params.items.reduce(
+    (sum, item) => sum + item.originalAmount,
     0,
   );
   const discountAmount = params.items.reduce(
     (sum, item) => sum + item.discountAmount,
     0,
   );
-  const totalAmount = originalPrice - discountAmount;
+  const totalAmount = originalAmount - discountAmount;
   const orderCreatedAt = params.createdAt ?? now;
 
   return prisma.$transaction(async (tx) => {
@@ -566,7 +566,7 @@ async function createOrderWithoutPayment(params: {
       data: {
         shopId: params.shopId,
         userId: params.userId,
-        originalPrice,
+        originalAmount,
         discountAmount,
         totalAmount,
         createdAt: orderCreatedAt,
@@ -580,9 +580,9 @@ async function createOrderWithoutPayment(params: {
           orderId: order.id,
           productId: item.productId,
           ticketType: item.ticketType,
-          originalPrice: item.originalPrice,
+          originalAmount: item.originalAmount,
           discountAmount: item.discountAmount,
-          price: item.originalPrice - item.discountAmount,
+          amount: item.originalAmount - item.discountAmount,
           purchasedMinutes: item.purchasedMinutes,
           purchasedDurationDays: item.purchasedDurationDays,
           usableDays: item.usableDays,
@@ -751,7 +751,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -770,7 +770,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 5000,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -789,7 +789,7 @@ async function main() {
       {
         productId: PRODUCT.hongdaePeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 90000,
+        originalAmount: 90000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -808,7 +808,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -827,7 +827,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -847,7 +847,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -867,7 +867,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 10000,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -875,7 +875,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -894,7 +894,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -902,7 +902,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -921,7 +921,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -929,7 +929,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 5000,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -937,7 +937,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 5000,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -956,7 +956,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -964,7 +964,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -983,7 +983,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -991,7 +991,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1011,7 +1011,7 @@ async function main() {
       {
         productId: PRODUCT.hongdaePeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 90000,
+        originalAmount: 90000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1019,7 +1019,7 @@ async function main() {
       {
         productId: PRODUCT.hongdaePeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 90000,
+        originalAmount: 90000,
         discountAmount: 9000,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1038,7 +1038,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1046,7 +1046,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1065,7 +1065,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1073,7 +1073,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1081,7 +1081,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1100,7 +1100,7 @@ async function main() {
       {
         productId: PRODUCT.hongdaeTime120,
         ticketType: TicketType.TIME,
-        originalPrice: 12000,
+        originalAmount: 12000,
         discountAmount: 0,
         usableDays: 30,
         purchasedMinutes: 120,
@@ -1119,7 +1119,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime300Inactive,
         ticketType: TicketType.TIME,
-        originalPrice: 30000,
+        originalAmount: 30000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 300,
@@ -1138,7 +1138,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod7Deleted,
         ticketType: TicketType.PERIOD,
-        originalPrice: 20000,
+        originalAmount: 20000,
         discountAmount: 0,
         usableDays: 7,
         purchasedDurationDays: 7,
@@ -1157,7 +1157,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1176,7 +1176,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1200,7 +1200,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1208,7 +1208,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1235,7 +1235,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1257,7 +1257,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamPeriod30,
         ticketType: TicketType.PERIOD,
-        originalPrice: 100000,
+        originalAmount: 100000,
         discountAmount: 0,
         usableDays: 30,
         purchasedDurationDays: 30,
@@ -1283,7 +1283,7 @@ async function main() {
       {
         productId: PRODUCT.gangnamTime600,
         ticketType: TicketType.TIME,
-        originalPrice: 50000,
+        originalAmount: 50000,
         discountAmount: 0,
         usableDays: 60,
         purchasedMinutes: 600,
@@ -1303,7 +1303,7 @@ async function main() {
   // 취소1) 전액 취소(SUCCEEDED) - order2(시간권 단품, 45000원) 전체 환불 완료 → 락 없음
   const cancel1 = await createPaymentCancel({
     paymentId: order2.payment.id,
-    items: [{ orderItemId: order2.orderItems[0].id, amount: order2.orderItems[0].price }],
+    items: [{ orderItemId: order2.orderItems[0].id, amount: order2.orderItems[0].amount }],
     reason: '단순 변심',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 10),
@@ -1312,7 +1312,7 @@ async function main() {
   // 취소2) 상품 단위 부분 취소(SUCCEEDED) - order1(정기권, 100000원)을 15일 사용 후 잔여 절반만 환불
   const cancel2 = await createPaymentCancel({
     paymentId: order1.payment.id,
-    items: [{ orderItemId: order1.orderItems[0].id, amount: Math.floor(order1.orderItems[0].price / 2) }],
+    items: [{ orderItemId: order1.orderItems[0].id, amount: Math.floor(order1.orderItems[0].amount / 2) }],
     reason: '정기권 15일 사용 후 잔여기간 비례 환불',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 2),
@@ -1321,7 +1321,7 @@ async function main() {
   // 취소3) 다건 주문 중 일부 상품만 취소(SUCCEEDED) - order7(정기권+시간권) 중 시간권만 환불
   const cancel3 = await createPaymentCancel({
     paymentId: order7.payment.id,
-    items: [{ orderItemId: order7.orderItems[1].id, amount: order7.orderItems[1].price }],
+    items: [{ orderItemId: order7.orderItems[1].id, amount: order7.orderItems[1].amount }],
     reason: '시간권만 취소 요청',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 5),
@@ -1330,7 +1330,7 @@ async function main() {
   // 취소4) 다건 주문 전체 취소(SUCCEEDED) - order9(정기권+시간권+시간권) 전부 환불(PaymentCancelItem 3건)
   const cancel4 = await createPaymentCancel({
     paymentId: order9.payment.id,
-    items: order9.orderItems.map((item) => ({ orderItemId: item.id, amount: item.price })),
+    items: order9.orderItems.map((item) => ({ orderItemId: item.id, amount: item.amount })),
     reason: '매장 사정으로 전체 주문 취소',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 24),
@@ -1375,7 +1375,7 @@ async function main() {
   // 취소9) 미확정 취소(REQUESTED) - order8 두 번째 시간권(50000원) 전액 환불 요청, PG 응답 대기 중 → RefundLock 보유
   const cancel9 = await createPaymentCancel({
     paymentId: order8.payment.id,
-    items: [{ orderItemId: order8.orderItems[1].id, amount: order8.orderItems[1].price }],
+    items: [{ orderItemId: order8.orderItems[1].id, amount: order8.orderItems[1].amount }],
     reason: '단순 변심',
     status: PaymentCancelStatus.REQUESTED,
     requestedAt: subMinutes(now, 3),
@@ -1384,7 +1384,7 @@ async function main() {
   // 취소10) 미확정 취소(REQUESTED) - order13 정기권+시간권 전체 환불 요청(PaymentCancelItem 2건), PG 응답 대기 → RefundLock 2건
   const cancel10 = await createPaymentCancel({
     paymentId: order13.payment.id,
-    items: order13.orderItems.map((item) => ({ orderItemId: item.id, amount: item.price })),
+    items: order13.orderItems.map((item) => ({ orderItemId: item.id, amount: item.amount })),
     reason: '매장 사정으로 전체 주문 취소 요청',
     status: PaymentCancelStatus.REQUESTED,
     requestedAt: subMinutes(now, 8),
@@ -1393,7 +1393,7 @@ async function main() {
   // 취소11) 취소 거절(FAILED) - order14 정기권(100000원) 환불 시도했으나 PG사가 확정적으로 거절 → 락 없음(해제됨)
   const cancel11 = await createPaymentCancel({
     paymentId: order14.payment.id,
-    items: [{ orderItemId: order14.orderItems[2].id, amount: order14.orderItems[2].price }],
+    items: [{ orderItemId: order14.orderItems[2].id, amount: order14.orderItems[2].amount }],
     reason: '단순 변심',
     status: PaymentCancelStatus.FAILED,
     failureReason: 'PG사 응답: 이미 정산 완료된 거래로 취소 불가',
@@ -1404,8 +1404,8 @@ async function main() {
   const cancel12 = await createPaymentCancel({
     paymentId: order14.payment.id,
     items: [
-      { orderItemId: order14.orderItems[0].id, amount: order14.orderItems[0].price },
-      { orderItemId: order14.orderItems[1].id, amount: order14.orderItems[1].price },
+      { orderItemId: order14.orderItems[0].id, amount: order14.orderItems[0].amount },
+      { orderItemId: order14.orderItems[1].id, amount: order14.orderItems[1].amount },
     ],
     reason: '시간권만 취소 요청',
     status: PaymentCancelStatus.REQUESTED,

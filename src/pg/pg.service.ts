@@ -32,6 +32,7 @@ export class PgService {
 
   // PG 결제 취소(환불) 요청
   async requestPaymentCancel(
+    paymentCancelId: string,
     orderId: string,
     orderItemId: string,
     userId: string,
@@ -45,6 +46,7 @@ export class PgService {
     });
 
     this.transactionLoggerService.logRefundRequest(
+      paymentCancelId,
       orderId,
       orderItemId,
       userId,

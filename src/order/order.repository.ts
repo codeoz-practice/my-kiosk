@@ -35,9 +35,9 @@ export class OrderRepository {
       const createOrderItems = products.reduce<
         {
           ticketType: TicketType; // 구매 시점 티켓 타입(시간권, 기간권)
-          originalPrice: number; // 구매 시점 가격 스냅샷
+          originalAmount: number; // 구매 시점 가격 스냅샷
           discountAmount: number; // 항목 할인액
-          price: number; // 실결제 금액 스냅샷(originalPrice - discountAmount)
+          amount: number; // 실결제 금액 스냅샷(originalAmount - discountAmount)
           purchasedMinutes: number | null; // 시간권: 구매 시점 분 스냅샷
           purchasedDurationDays: number | null; // 정기권: 구매 시점 기간 스냅샷
           productId: string;
@@ -59,9 +59,9 @@ export class OrderRepository {
         for (let i = 0; i < product.quantity; i++) {
           acc.push({
             ticketType: foundProduct.ticketType,
-            originalPrice: foundProduct.price,
+            originalAmount: foundProduct.amount,
             discountAmount: discountAmount,
-            price: foundProduct.price - discountAmount,
+            amount: foundProduct.amount - discountAmount,
             purchasedMinutes: foundProduct.purchasedMinutes,
             purchasedDurationDays: foundProduct.purchasedDurationDays,
             productId: foundProduct.id,
@@ -72,17 +72,17 @@ export class OrderRepository {
       }, []);
 
       // 주문 금액 계산
-      const { originalPrice, discountAmount, totalAmount } =
+      const { originalAmount, discountAmount, totalAmount } =
         createOrderItems.reduce(
           (acc, orderItem) => {
             return {
-              originalPrice: acc.originalPrice + orderItem.price,
+              originalAmount: acc.originalAmount + orderItem.amount,
               discountAmount: acc.discountAmount + orderItem.discountAmount,
               totalAmount:
-                acc.totalAmount + orderItem.price - orderItem.discountAmount,
+                acc.totalAmount + orderItem.amount - orderItem.discountAmount,
             };
           },
-          { originalPrice: 0, discountAmount: 0, totalAmount: 0 },
+          { originalAmount: 0, discountAmount: 0, totalAmount: 0 },
         );
 
       // order + orderItem 데이터 생성
@@ -90,7 +90,7 @@ export class OrderRepository {
         data: {
           shopId,
           userId,
-          originalPrice,
+          originalAmount,
           discountAmount,
           totalAmount,
           orderItems: { create: createOrderItems },
@@ -113,15 +113,15 @@ export class OrderRepository {
         id: true,
         shopId: true,
         userId: true,
-        originalPrice: true,
+        originalAmount: true,
         discountAmount: true,
         totalAmount: true,
         orderItems: {
           select: {
             productId: true,
-            originalPrice: true,
+            originalAmount: true,
             discountAmount: true,
-            price: true,
+            amount: true,
             purchasedMinutes: true,
             purchasedDurationDays: true,
             ticket: {
@@ -149,7 +149,7 @@ export class OrderRepository {
           select: {
             type: true,
             status: true,
-            price: true,
+            amount: true,
             approvedAt: true,
           },
         },

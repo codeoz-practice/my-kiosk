@@ -289,9 +289,10 @@ model Payment {
 }
 
 enum PaymentCancelStatus {
-  REQUESTED // PG에 취소 요청 발송, 응답 대기중(미확정)
-  SUCCEEDED // PG가 취소 확정
-  FAILED    // PG가 취소를 확정적으로 거절
+  REQUESTED         // PG에 취소 요청 발송, 응답 대기중(미확정)
+  PENDING_APPROVAL  // 사용 이력 있는 건 - 점주 승인 대기(락 미획득, PG 요청 전, 금액 미확정)
+  SUCCEEDED         // PG가 취소 확정
+  FAILED            // PG가 취소를 확정적으로 거절
 }
 
 // 우리 시스템이 자체 판단한 실패 원인 분류 - PG가 알려주지 않는 사유(pgErrorCode로 표현 불가)를 코드로 필터링하기 위한 용도
@@ -311,6 +312,7 @@ model PaymentCancel {
   failureCode PaymentCancelFailureCode? @map("failure_code") // 우리 시스템이 자체 판단한 실패 원인 분류(코드 조회용)
   failureReason String? @map("failure_reason") // 확정 실패 시 사유 상세(사람이 읽는 설명)
   pgTransactionId String? @unique @map("pg_transaction_id") // PG사 취소 거래 ID (취소 요청 응답으로 수신)
+  idempotencyKey String? @map("idempotency_key") // 요청 시점의 Idempotency-Key(클라이언트가 보낸 헤더 값) - 낡은 락 정리 시 "이번 요청이 이 시도를 만들었던 그 요청인지" 판단하는 근거
   requestedAt  DateTime  @map("requested_at")  // 취소 요청 시각
   cancelledAt  DateTime? @map("cancelled_at")  // 취소 완료 시각
   failedAt DateTime? @updatedAt @map("failed_at")

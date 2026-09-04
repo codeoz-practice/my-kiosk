@@ -22,6 +22,7 @@ import configuration from './config/configuration';
 import { validationSchema } from './config/validation.schema';
 import { winstonConfig } from './logger/logger.config';
 import { LoggerModule } from './logger/logger.module';
+import { RefundModule } from './refund/refund.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { LoggerModule } from './logger/logger.module';
     TicketModule,
     AuthModule,
     UserModule,
+    RefundModule,
   ],
   controllers: [AppController],
   providers: [

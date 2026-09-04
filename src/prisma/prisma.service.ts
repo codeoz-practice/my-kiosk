@@ -14,6 +14,16 @@ export type TransactionClient = Omit<
 import { PrismaPg } from '@prisma/adapter-pg';
 
 /**
+ * executeTransaction 콜백에 전달되는 트랜잭션 클라이언트 타입
+ * - Prisma.TransactionClient 대신 이 타입을 써야 executeTransaction의
+ *   실제 반환 타입과 어긋나지 않는다
+ */
+export type TransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+/**
  * Prisma 서비스
  * - Prisma Client 연결 관리 (Prisma 7 + @prisma/adapter-pg)
  * - 애플리케이션 생명주기와 연동
@@ -112,17 +122,7 @@ export class PrismaService
    * @returns 콜백 함수의 반환값
    */
   async executeTransaction<T>(
-    operations: (
-      prisma: Omit<
-        PrismaClient,
-        | '$connect'
-        | '$disconnect'
-        | '$on'
-        | '$transaction'
-        | '$use'
-        | '$extends'
-      >,
-    ) => Promise<T>,
+    operations: (prisma: TransactionClient) => Promise<T>,
   ): Promise<T> {
     return this.$transaction(operations);
   }

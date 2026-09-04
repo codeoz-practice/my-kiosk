@@ -15,7 +15,7 @@ export interface PgPayload {
 export interface PaymentOutData {
   type: PaymentType;
   status: PaymentStatus;
-  price: number;
+  amount: number;
 }
 
 export interface BasePaymentData {

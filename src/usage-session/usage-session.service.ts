@@ -2,11 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { UsageSessionRepository } from './usage-session.repository';
 import { TicketRepository } from 'src/ticket/ticket.repository';
 import { addDays, addMinutes } from 'date-fns';
-import { withRetry } from 'src/common/utils/retry.util';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SortOrder } from './usage-session.types';
-import { assertDefined } from 'src/common/utils/assert.util';
+import { withRetry, assertDefined } from '@felix_ys/ts-utils';
 
 const mockExternalApi = async (waitMs: number = 1000) => {
   await new Promise((resolve) => setTimeout(resolve, waitMs));

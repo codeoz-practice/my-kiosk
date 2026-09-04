@@ -30,7 +30,7 @@ export class CreateProductDto {
   @IsNumber()
   @Min(0)
   @Max(10000000)
-  price!: number;
+  amount!: number;
 
   @ApiProperty({ description: '유효기간' })
   @Min(1)

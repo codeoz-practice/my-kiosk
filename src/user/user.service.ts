@@ -34,6 +34,8 @@ export class UserService {
 
     const user = await this.userRepository.create(email, hashedPassword, role);
 
+    // 비밀번호를 제외한 결과값으로 응답
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...result } = user;
     return result;
   }

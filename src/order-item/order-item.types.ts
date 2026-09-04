@@ -2,9 +2,9 @@ import { TicketSummaryOutData } from 'src/ticket/ticket.types';
 
 export interface OrderItemOutData {
   productId: string;
-  originalPrice: number;
+  originalAmount: number;
   discountAmount: number;
-  price: number;
+  amount: number;
   purchasedMinutes: number | null;
   purchasedDurationDays: number | null;
   ticket: TicketSummaryOutData | null;

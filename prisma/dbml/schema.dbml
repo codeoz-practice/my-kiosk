@@ -167,6 +167,7 @@ Table payment_cancels {
   failureCode PaymentCancelFailureCode
   failureReason String
   pgTransactionId String [unique]
+  idempotencyKey String
   requestedAt DateTime [not null]
   cancelledAt DateTime
   failedAt DateTime
@@ -322,6 +323,7 @@ Enum PaymentStatus {
 
 Enum PaymentCancelStatus {
   REQUESTED
+  PENDING_APPROVAL
   SUCCEEDED
   FAILED
 }

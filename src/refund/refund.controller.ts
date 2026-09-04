@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Query,
@@ -22,11 +23,12 @@ export class RefundController {
   async refund(
     @CurrentUser() user: JwtValidationResult,
     @Body() dto: RefundDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return await this.refundService.refund(
       user.userId,
       dto.ticketId,
-      dto.refundAmount,
+      idempotencyKey,
     );
   }
 

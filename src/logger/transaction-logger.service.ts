@@ -24,8 +24,8 @@ export interface TransactionLog {
   transactionId: string;
   type: 'ORDER' | 'PAYMENT' | 'SHIPMENT' | 'REFUND';
   userId: string;
-  orderId: string;
-  orderItemId: string;
+  orderId?: string;
+  orderItemId?: string;
   amount?: number;
   status: string;
   metadata?: Record<string, any>;
@@ -82,7 +82,25 @@ export class TransactionLoggerService {
     });
   }
 
+  logPaymentRequest(
+    orderId: string,
+    userId: string,
+    amount: number,
+    paymentMethod: string,
+  ): void {
+    this.logTransaction({
+      transactionId: `PAY-${orderId}-${Date.now()}`,
+      type: 'PAYMENT',
+      userId,
+      orderId,
+      amount,
+      status: 'REQUEST',
+      metadata: { paymentMethod },
+    });
+  }
+
   logRefund(
+    paymentCancelId: string,
     orderId: string,
     orderItemId: string,
     userId: string,
@@ -90,7 +108,7 @@ export class TransactionLoggerService {
     reason: string,
   ): void {
     this.logTransaction({
-      transactionId: `REFUND-${orderId}-${Date.now()}`,
+      transactionId: `REFUND-${paymentCancelId}-${Date.now()}`,
       type: 'REFUND',
       userId,
       orderId,
@@ -98,6 +116,25 @@ export class TransactionLoggerService {
       amount,
       status: 'REFUNDED',
       metadata: { reason },
+    });
+  }
+
+  logRefundRequest(
+    paymentCancelId: string,
+    orderId: string,
+    orderItemId: string,
+    userId: string,
+    amount: number,
+  ): void {
+    this.logTransaction({
+      transactionId: `REFUND-${paymentCancelId}-${Date.now()}`,
+      type: 'REFUND',
+      userId,
+      orderId,
+      orderItemId,
+      amount,
+      status: 'REQUEST',
+      metadata: {},
     });
   }
 }

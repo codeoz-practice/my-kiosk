@@ -3,8 +3,10 @@ import {
   PaymentCancelFailureCode,
   PaymentCancelStatus,
   PaymentStatus,
+  UsageSessionStatus,
 } from '@prisma/client';
 import { PrismaService, TransactionClient } from 'src/prisma/prisma.service';
+import { DomainConflictError } from 'src/common/errors';
 
 @Injectable()
 export class RefundRepository {
@@ -32,6 +34,16 @@ export class RefundRepository {
       where: { id },
       select: {
         userId: true,
+        type: true,
+        activatedAt: true,
+        remainingMinutes: true,
+        purchasedMinutes: true,
+        // 진행 중인 세션이 있으면 remainingMinutes가 아직 차감 전(사후 정산 방식)이라도
+        // 사용 이력이 있다고 판단해야 하므로 ACTIVE 세션 존재 여부를 함께 조회한다.
+        usageSessions: {
+          where: { status: UsageSessionStatus.ACTIVE },
+          select: { id: true },
+        },
         orderItem: {
           select: {
             id: true,
@@ -54,10 +66,12 @@ export class RefundRepository {
     });
   }
 
+  // 자동 처리(REQUESTED) 전용 - 승인 대기 생성은 createPendingApprovalPaymentCancel 참고
   async createPaymentCancel(
     amount: number,
     paymentId: string,
     requestedAt: Date,
+    idempotencyKey?: string,
     client: TransactionClient | PrismaService = this.prisma,
   ) {
     return await client.paymentCancel.create({
@@ -65,8 +79,66 @@ export class RefundRepository {
         amount,
         paymentId,
         requestedAt,
+        idempotencyKey,
         status: PaymentCancelStatus.REQUESTED,
       },
+    });
+  }
+
+  // 같은 orderItemId로 이미 승인 대기 중인 요청이 있는지 확인한다(중복 신청 방지용).
+  async getPendingApprovalPaymentCancelItem(
+    orderItemId: string,
+    client: TransactionClient | PrismaService = this.prisma,
+  ) {
+    return await client.paymentCancelItem.findFirst({
+      where: {
+        orderItemId,
+        paymentCancel: { status: PaymentCancelStatus.PENDING_APPROVAL },
+      },
+    });
+  }
+
+  // 사용 이력 있는 건 - 점주 승인 대기 상태로만 PaymentCancel/PaymentCancelItem을 생성한다.
+  // 금액은 아직 확정되지 않으므로(점주가 승인 시점에 입력) 0으로 저장한다.
+  // RefundLock은 만들지 않는다 - 아직 PG에 아무 요청도 나가지 않아 락으로 막을 대상(PG
+  // 취소 실행 중복)이 없기 때문이다. 대신 같은 orderItemId의 중복 신청은 이 메서드
+  // 안에서 확인한다. 중복 확인과 생성을 원자적으로 묶어야 하므로 항상 새 트랜잭션을 연다.
+  async createPendingApprovalPaymentCancel(
+    paymentId: string,
+    orderItemId: string,
+    requestedAt: Date,
+    idempotencyKey?: string,
+  ) {
+    return this.runInTransaction(async (tx) => {
+      const existing = await this.getPendingApprovalPaymentCancelItem(
+        orderItemId,
+        tx,
+      );
+      if (existing) {
+        throw new DomainConflictError(
+          '이미 승인 대기 중인 환불 요청이 있습니다',
+        );
+      }
+
+      const paymentCancel = await tx.paymentCancel.create({
+        data: {
+          amount: 0,
+          paymentId,
+          requestedAt,
+          idempotencyKey,
+          status: PaymentCancelStatus.PENDING_APPROVAL,
+        },
+      });
+
+      await tx.paymentCancelItem.create({
+        data: {
+          paymentCancelId: paymentCancel.id,
+          orderItemId,
+          amount: 0,
+        },
+      });
+
+      return paymentCancel;
     });
   }
 
@@ -172,20 +244,6 @@ export class RefundRepository {
     // deleteMany 사용 - 소유권(paymentCancelId)이 안 맞아 대상이 없어도
     // (동시 요청이 이미 같은 락을 처리하고 지운 경우) 에러 없이 무시된다
     await client.refundLock.deleteMany({
-      where: {
-        orderItemId,
-        paymentCancelId,
-      },
-    });
-  }
-
-  async deleteLock(
-    orderItemId: string,
-    paymentCancelId: string, // 본인이 만든 락이 맞는지 확인을 위해 where 절에 추가
-  ) {
-    // deleteMany 사용 - 소유권(paymentCancelId)이 안 맞아 대상이 없어도
-    // (이미 재시도가 다른 paymentCancelId로 락을 점유한 경우) 에러 없이 무시된다
-    await this.prisma.refundLock.deleteMany({
       where: {
         orderItemId,
         paymentCancelId,

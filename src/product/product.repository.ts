@@ -22,7 +22,7 @@ export class ProductRepository {
         shop: { connect: { id: shopId } },
         name: data.name,
         ticketType: data.ticketType,
-        price: data.price,
+        amount: data.amount,
         usableDays: data.usableDays,
         isActive: data.isActive,
         purchasedMinutes:
@@ -51,7 +51,7 @@ export class ProductRepository {
           id: true,
           name: true,
           ticketType: true,
-          price: true,
+          amount: true,
           purchasedMinutes: true,
           purchasedDurationDays: true,
           usableDays: true,

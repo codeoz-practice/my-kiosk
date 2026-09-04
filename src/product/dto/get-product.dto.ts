@@ -4,7 +4,7 @@ import { PaginationDto } from 'src/common/pagination/pagination.dto';
 
 const PRODUCT_SORT_FIELDS = [
   'name',
-  'price',
+  'amount',
   'usableDays',
   'createdAt',
 ] as const;

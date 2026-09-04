@@ -91,7 +91,7 @@ export class PaymentService {
     }
 
     // 결재 금액 다름 - 취소 요청
-    if (payload.amount !== payment.price) {
+    if (payload.amount !== payment.amount) {
       await this.paymentRepository.failedPayment(
         payment.id,
         `결재 금액이 일치하지 않습니다: (승인금액:${payload.amount})`,

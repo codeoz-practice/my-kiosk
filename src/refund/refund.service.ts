@@ -3,9 +3,14 @@ import {
   PaymentCancelFailureCode,
   PaymentCancelStatus as PrismaPaymentCancelStatus,
   RefundLock,
+  TicketType,
 } from '@prisma/client';
 import { RefundRepository } from './refund.repository';
-import { PaymentCancelStatus, paymentCancelStatusMap } from './refund.types';
+import {
+  PaymentCancelStatus,
+  paymentCancelStatusMap,
+  RefundResult,
+} from './refund.types';
 import {
   DomainConflictError,
   DomainForbiddenError,
@@ -14,10 +19,17 @@ import {
 import { TransactionLoggerService } from '../logger/transaction-logger.service';
 import { PgService } from 'src/pg/pg.service';
 import { PgCancelInquiryResult } from 'src/pg/pg.types';
+import { assertNever, UnhandledCaseError } from '@felix_ys/ts-utils';
 
 // 만료된 락을 PG 조회하는 동안 선점(연장)해두는 시간 - 조회 타임아웃 예상치보다 여유 있게 설정
 const pgInquiryLockTtlMs = 30 * 1000;
 
+/**
+ * `RefundLock`: "지금 이 상품(orderItem)에 대해 누군가 환불을 진행 중이다"라는 깃발
+ * - 깃발이 없으면 → 아무도 진행 중이지 않으니 새로 시작
+ * - 깃발이 꽂혀 있고 아직 유효하면 → 다른 사람이 진행 중이니 끼어들지 않고 409로 거부
+ * - 깃발이 꽂혀 있는데 유효기간(1분)이 지났으면 → "누군가 깃발을 꽂아놓고 결과를 못 들은 채 사라진" 미제 상태. 이때 곧장 깃발을 뽑아버리면 위험하니, 먼저 "내가 조사 중"이라고 깃발을 다시 세워두고(연장/선점) PG에 진실을 물어본 뒤에야 정리한다
+ */
 @Injectable()
 export class RefundService {
   constructor(
@@ -26,8 +38,27 @@ export class RefundService {
     private readonly pgService: PgService,
   ) {}
 
-  async refund(userId: string, ticketId: string, refundAmount: number) {
-    const now = new Date();
+  /**
+   * - 환불은 상품(orderItem) 단위로 이루어진다
+   * - 동일한 상품에 대해서 동시에 환불이 진행되지 않는다
+   * - 사용 이력이 없는 건(미사용)만 이 메서드 안에서 자동으로 락 획득/PG 요청까지
+   *   처리한다. 금액은 고객이 지정하지 않고 서버가 원가 전액으로 계산한다
+   * - 사용 이력이 있는 건은 점주 승인이 필요하므로, 이 메서드는 승인 대기 상태의
+   *   PaymentCancel만 만들고 락 없이 종료한다(승인/거절 처리는 이 메서드의 책임이 아니다)
+   * - 환불 요청의 상태 확정은 PG의 응답(callback, inquiryPaymentCancel)에 대해서만 확정 짓는다
+   * - 락이 존재하는 상품은 그 환불 요청이 확정되지 않으면 다음 환불 요청 진행이 불가하다
+   * - 락이 만료됐지만 확정되지 않은 요청은, 다음 환불 요청이 PG에 재조회해 스스로 확정 짓는다
+   * @param userId
+   * @param ticketId
+   * @param idempotencyKey
+   * @returns
+   */
+  async refund(
+    userId: string,
+    ticketId: string,
+    idempotencyKey?: string,
+  ): Promise<RefundResult> {
+    // 1️⃣ 검증
     const ticket = await this.refundRepository.getTicketById(ticketId);
 
     if (!ticket) {
@@ -39,93 +70,143 @@ export class RefundService {
     if (!ticket.orderItem?.id) {
       throw new DomainNotFoundError('주문 정보가 존재하지 않습니다');
     }
-
     const [payment] = ticket.orderItem.order.payments;
     if (!payment || !payment.id) {
       throw new DomainNotFoundError('결재 정보가 존재하지 않습니다');
     }
 
-    // 1차 트랜잭션: 락 상태 확인. 만료된 락이 있으면, PG 조회를 진행하는 동안
-    // 다른 요청이 같은 만료 락을 보고 중복으로 조회를 시작하지 못하도록 즉시 선점(연장)한다.
-    const staleLock = await this.refundRepository.runInTransaction(
-      async (tx) => {
-        const refundLock = await this.refundRepository.getRefundLock(
+    // 1.5️⃣ 사용 이력 분기 - 재량이 필요 없는 미사용 건만 이 요청 안에서 자동 처리한다.
+    // 사용 이력이 있으면 점주 승인 없이는 금액/락을 확정할 수 없으므로 여기서 멈춘다.
+    if (!isUnusedTicket(ticket)) {
+      const pending =
+        await this.refundRepository.createPendingApprovalPaymentCancel(
+          payment.id,
           ticket.orderItem.id,
-          tx,
+          new Date(),
+          idempotencyKey,
         );
-        if (!refundLock) return null;
-        if (refundLock.expiresAt > new Date()) {
-          throw new DomainConflictError('환불 진행 중인 상품입니다');
-        }
+      return { status: 'PENDING_APPROVAL', paymentCancelId: pending.id };
+    }
 
-        const extendedCount = await this.refundRepository.extendRefundLock(
-          ticket.orderItem.id,
-          refundLock.paymentCancelId,
-          new Date(Date.now() + pgInquiryLockTtlMs),
-          tx,
-        );
-        // 연장된 행이 없으면 그 사이 다른 트랜잭션이 이미 처리(삭제)한 것
-        if (extendedCount === 0) {
-          throw new DomainConflictError('환불 진행 중인 상품입니다');
-        }
-
-        return refundLock;
-      },
-    );
-
-    // staleLock: "예전에 어떤 요청이 락을 잡았는데, TTL(1분) 안에 정상적으로 처리(성공/실패 확정)되지 못한 채 시간이 지나버린 상태"
+    // 2️⃣ 낡은 락(만료됐는데 아무도 후속 처리를 안 해서 방치된 락)이 있으면 정리한다.
+    // (미사용 자동 처리 경로 - 이하 3️⃣, 4️⃣도 이 경로 전용)
+    const staleLock = await this.acquireStaleLock(ticket.orderItem.id);
     if (staleLock) {
-      const alreadySucceeded = await this.settleStaleLock(
+      // 낡은 깃발(만료된 락)을 PG에 진실을 물어 정리한다. 정리와 별개로,
+      // "이번 요청이 그 낡은 시도를 만들었던 바로 그 요청인지"는 idempotencyKey로 판단한다.
+      const settlement = await this.clearStaleLock(
         ticket.orderItem.order.id,
         ticket.orderItem.id,
         userId,
-        refundAmount,
         staleLock,
       );
-      // 이전 건이 이미 PG에서 성공 처리된 것으로 확인됐다면, 새 환불을 만들지 않고 조용히 종료한다.
-      if (alreadySucceeded) return;
+      // 이번 요청과 같은 시도였다면(키 일치), PG가 낸 결론을 그대로 이번 요청의
+      // 결론으로 재현한다 - 성공/실패 어느 쪽이든 새로 만들지 않고 여기서 끝난다.
+      if (settlement.idempotencyKey === idempotencyKey) {
+        if (!settlement.succeeded) {
+          throw new DomainConflictError(
+            '환불 요청이 실패로 처리되었습니다. 사유: ' +
+              (settlement.failureReason ?? '알 수 없음'),
+          );
+        }
+        return { status: 'PROCESSED' };
+      }
+      // 키가 다르면(또는 둘 중 하나라도 없으면) 별개의 새 요청이다 - 낡은 시도의
+      // 성공/실패 여부와 무관하게 이번 요청은 계속 진행한다(아래 검증을 다시 통과해야 함).
     }
 
-    // 환불 가능 금액 검사 -> 환불 진행 락(트랜잭션으로)
+    // 3️⃣ 환불 객체 + 락 생성 (금액은 서버가 원가 전액으로 계산 - 클라이언트 입력 없음)
+    const paymentCancel = await this.createRefundWithLock(
+      ticket.orderItem.id,
+      payment.id,
+      idempotencyKey,
+    );
+
+    // 4️⃣ PG 요청 시도(+실패로깅) - 응답은 완료 콜백 함수에서 처리
+    try {
+      await this.pgService.requestPaymentCancel(
+        paymentCancel.id,
+        ticket.orderItem.order.id,
+        ticket.orderItem.id,
+        userId,
+        paymentCancel.amount,
+      );
+    } catch (error) {
+      // PG 응답 자체를 못 받은 경우(타임아웃/네트워크 에러 등) - PG가 실제로는
+      // 처리했을 수 있으므로 FAILED로 확정하지 않는다. REQUESTED 상태와 락을
+      // 그대로 두어, 뒤늦은 콜백이 오면 반영되거나 TTL 만료 후 재시도되게 한다.
+      const message =
+        error instanceof Error ? error.message : 'PG 취소 요청 중 에러 발생';
+      this.transactionLoggerService.logRefund(
+        paymentCancel.id,
+        ticket.orderItem.order.id,
+        ticket.orderItem.id,
+        userId,
+        paymentCancel.amount,
+        `PG 취소 요청 응답 실패(PaymentCancel: ${paymentCancel.id}): ${message}`,
+      );
+    }
+
+    return { status: 'PROCESSED' };
+  }
+
+  // 환불 가능 금액을 계산하고 새 깃발(락)과 함께 환불을 생성한다.
+  // 미사용 자동 처리 경로 전용 - 금액은 클라이언트 입력 없이 원가 전액으로 서버가 계산한다.
+  private async createRefundWithLock(
+    orderItemId: string,
+    paymentId: string,
+    idempotencyKey?: string,
+  ) {
+    // 환불 가능 금액 계산 -> 환불 진행 락(트랜잭션으로)
     const { paymentCancel } = await this.refundRepository.runInTransaction(
       async (tx) => {
-        // 방어적 재확인 - settleStaleLock 이후에도 유효한 락이 남아있으면 다른 요청과 경합 중인 것
+        // 방어적 재확인 - 1부 정리 이후에도 유효한 락이 남아있으면 다른 요청과 경합 중인 것
+        // (1부가 정상적으로 락을 비웠다면 이 조건은 통과해야 정상이다)
         const lockCheck = await this.refundRepository.getRefundLock(
-          ticket.orderItem.id,
+          orderItemId,
           tx,
         );
         if (lockCheck && lockCheck.expiresAt > new Date()) {
           throw new DomainConflictError('환불 진행 중인 상품입니다');
         }
 
-        // 환불 가능 금액 계산
+        // 환불 가능 금액 계산 - 미사용 건은 원가 전액(refund_amount)이 유일하게 허용되는 값.
+        // refund_amount는 OrderItem 원가 자체라 상수이고, refundable_amount는 거기서
+        // 이미 SUCCEEDED로 취소된 금액을 뺀 값이다.
         const refund = await this.refundRepository.calculateRefundableAmount(
-          ticket.orderItem.id,
+          orderItemId,
           tx,
         );
+        const finalRefundAmount = refund.refund_amount;
 
-        if (refundAmount > refund.refund_amount) {
-          throw new DomainConflictError(
-            '환불 요청 금액이 환불 가능 금액 보다 많습니다',
-          );
+        // 이중 환불 방지: 이 티켓으로 이미 전액 환불(SUCCEEDED)이 끝났다면
+        // refundable_amount가 0으로 줄어 있다. callback()이 성공 처리 시 Ticket을
+        // 갱신하지 않으므로(activatedAt/remainingMinutes가 그대로 남음) 같은 티켓으로
+        // 다시 요청해도 isUnusedTicket()이 또 true를 반환한다 - RefundLock도 첫 환불
+        // 완료 시 삭제되어 재시도를 막지 못하므로, 이 비교가 이중 환불을 막는 유일한
+        // 장치다. Ticket 상태 전이(문서 환불_프로세스.md §6)가 구현되면 그쪽에서 먼저
+        // 막힐 수 있지만, 그때도 이 검증 자체는 유지해야 한다.
+        if (finalRefundAmount > (refund.refundable_amount ?? 0)) {
+          throw new DomainConflictError('환불 가능 금액을 초과했습니다');
         }
 
         const paymentCancel = await this.refundRepository.createPaymentCancel(
-          refundAmount,
-          payment.id,
-          now,
+          finalRefundAmount,
+          paymentId,
+          new Date(),
+          idempotencyKey,
           tx,
         );
 
         await this.refundRepository.createPaymentCancelItem(
           paymentCancel.id,
-          ticket.orderItem.id,
-          refundAmount,
+          orderItemId,
+          finalRefundAmount,
           tx,
         );
 
         await this.refundRepository.createRefundLock(
-          ticket.orderItem.id,
+          orderItemId,
           paymentCancel.id,
           new Date(Date.now() + 1 * 60 * 1000),
           tx,
@@ -137,43 +218,62 @@ export class RefundService {
       },
     );
 
-    try {
-      // TODO: PG사 API 호출
-      // - 응답은 완료 콜백 함수에서 처리
-      await this.pgService.requestPaymentCancel(
-        ticket.orderItem.order.id,
-        ticket.orderItem.id,
-        userId,
-        refundAmount,
-      );
-    } catch (error) {
-      // PG 응답 자체를 못 받은 경우(타임아웃/네트워크 에러 등) - PG가 실제로는
-      // 처리했을 수 있으므로 FAILED로 확정하지 않는다. REQUESTED 상태와 락을
-      // 그대로 두어, 뒤늦은 콜백이 오면 반영되거나 TTL 만료 후 재시도되게 한다.
-      const message =
-        error instanceof Error ? error.message : 'PG 취소 요청 중 에러 발생';
-      this.transactionLoggerService.logRefund(
-        ticket.orderItem.order.id,
-        ticket.orderItem.id,
-        userId,
-        refundAmount,
-        `PG 취소 요청 응답 실패(PaymentCancel: ${paymentCancel.id}): ${message}`,
-      );
-    }
+    return paymentCancel;
   }
 
-  // 만료된 락에 걸린 이전 PaymentCancel의 실제 상태를 PG에 확인한 뒤 확정 처리한다.
-  // PG 조회는 외부 I/O이므로 DB 트랜잭션 밖에서 수행한다.
-  // 반환값이 true면 이전 건이 이미 PG에서 성공 처리된 것 - 호출부는 새 환불을 만들지 않아야 한다.
-  private async settleStaleLock(
+  // 이 상품(orderItem)에 낡은 깃발(만료된 락)이 있는지 찾아서, 있다면 먼저 선점(연장)해둔다.
+  // - 깃발이 아예 없다 → null (정리할 것 없음)
+  // - 깃발이 아직 유효하다 → 예외로 즉시 거부(다른 요청이 진행 중)
+  // - 깃발이 있고 만료됐다 → 결과를 못 들은 미제 상태("staleLock"). 곧장 뽑아버리면
+  //   위험하니, 먼저 "내가 조사 중"이라고 다시 세워두고(선점/연장) 반환한다.
+  //   PG 조회를 진행하는 동안 다른 요청이 같은 만료 락을 보고 중복으로
+  //   조회를 시작하지 못하도록 막기 위함이다.
+  private async acquireStaleLock(orderItemId: string) {
+    return this.refundRepository.runInTransaction(async (tx) => {
+      const refundLock = await this.refundRepository.getRefundLock(
+        orderItemId,
+        tx,
+      );
+      // 깃발이 아예 없다 - 아무도 진행 중이지 않으니 정리할 것도 없다.
+      if (!refundLock) return null;
+      if (refundLock.expiresAt > new Date()) {
+        throw new DomainConflictError('환불 진행 중인 상품입니다');
+      }
+
+      const extendedCount = await this.refundRepository.extendRefundLock(
+        orderItemId,
+        refundLock.paymentCancelId,
+        new Date(Date.now() + pgInquiryLockTtlMs),
+        tx,
+      );
+      // 연장된 행이 없으면 그 사이 다른 트랜잭션이 이미 선점했거나 처리(삭제)한 것 - 물러난다.
+      if (extendedCount === 0) {
+        throw new DomainConflictError('환불 진행 중인 상품입니다');
+      }
+
+      return refundLock;
+    });
+  }
+
+  // acquireStaleLock으로 선점해둔 낡은 깃발(만료된 락)을 PG에 진실을 물어 정리한다.
+  // 정리 자체(확정 처리 + 락 삭제)는 무조건 수행하고, 그 결과(성공/실패)와 그
+  // 시도가 어떤 idempotencyKey로 만들어졌는지를 호출부에 반환한다. "이 결과를
+  // 이번 요청의 결과로 재현해도 되는지"는 호출부가 idempotencyKey를 비교해서 판단한다.
+  private async clearStaleLock(
     orderId: string,
     orderItemId: string,
     userId: string,
-    refundAmount: number,
     staleLock: RefundLock,
-  ): Promise<boolean> {
+  ): Promise<{
+    idempotencyKey: string | null;
+    succeeded: boolean;
+    failureReason: string | null;
+  }> {
+    // 깃발을 선점했으니, 이제 PG에 진실을 물어봐서 미제 사건을 매듭짓는다.
+    // PG 조회는 외부 I/O이므로 DB 트랜잭션 밖에서 수행한다.
     let inquiryResult: PgCancelInquiryResult;
     try {
+      // 📤 PG 사에 환불 요청 상태 확인
       const inquiry = await this.pgService.inquiryPaymentCancel(
         orderId,
         orderItemId,
@@ -183,13 +283,19 @@ export class RefundService {
       inquiryResult = inquiry.result;
     } catch (error) {
       // 조회 자체가 실패한 경우("진짜 모름") - 아무것도 확정하지 않고 재시도 자체를 거부한다.
+      // 선점한 락이 그대로 남는다. ->
       const message =
         error instanceof Error ? error.message : 'PG 거래조회 중 에러 발생';
+      // 로깅용 amount는 더 이상 클라이언트로부터 받지 않으므로 기존 PaymentCancel에서 조회한다.
+      const existing = await this.refundRepository.getPaymentCancelById(
+        staleLock.paymentCancelId,
+      );
       this.transactionLoggerService.logRefund(
+        staleLock.paymentCancelId,
         orderId,
         orderItemId,
         userId,
-        refundAmount,
+        existing.amount,
         `PG 거래조회 실패로 재시도 거부(PaymentCancel: ${staleLock.paymentCancelId}): ${message}`,
       );
       throw new DomainConflictError(
@@ -197,84 +303,168 @@ export class RefundService {
       );
     }
 
+    // ☝️ 여기서는 PG사 환불 상태 조회에 성공한거잖아
+
     // 2차 트랜잭션: 락 재검증 + 콜백 선착 여부 확인 + 확정 처리
-    return await this.refundRepository.runInTransaction(async (tx) => {
-      const currentLock = await this.refundRepository.getRefundLock(
-        orderItemId,
-        tx,
-      );
-      // 1차 트랜잭션에서 이 요청이 선점(연장)해둔 락인지 확인한다. paymentCancelId가
-      // 다르면 그 사이 다른 요청이 이미 처리를 끝내고 새 락을 잡은 것 - 물러난다.
-      // (연장으로 인해 만료 시각은 항상 미래이므로 만료 여부 비교는 더 이상 의미가 없다.)
-      if (
-        !currentLock ||
-        currentLock.paymentCancelId !== staleLock.paymentCancelId
-      ) {
-        throw new DomainConflictError('환불 진행 중인 상품입니다');
-      }
-
-      // PG 조회 중 뒤늦은 콜백이 먼저 도착해 이미 확정됐을 수 있다 -
-      // 실측된 콜백 결과가 PG 재조회보다 신뢰도가 높으므로 그 결과를 그대로 존중한다.
-      const paymentCancel = await this.refundRepository.getPaymentCancelById(
-        staleLock.paymentCancelId,
-        tx,
-      );
-      if (paymentCancel.status !== PrismaPaymentCancelStatus.REQUESTED) {
-        await this.refundRepository.deleteRefundLock(
+    const settlement = await this.refundRepository.runInTransaction(
+      async (tx) => {
+        const currentLock = await this.refundRepository.getRefundLock(
           orderItemId,
-          staleLock.paymentCancelId,
           tx,
         );
-        return paymentCancel.status === PrismaPaymentCancelStatus.SUCCEEDED;
-      }
+        // 내가 1차 트랜잭션에서 선점(연장)해둔 깃발이 그 사이 걷혔다 - 다른 요청이
+        // 이미 이 미제 사건을 매듭짓고 정리까지 끝냈다는 뜻("진행 중"이 아니라 "이미 종료됨")
+        if (!currentLock) {
+          throw new DomainConflictError('이미 다른 요청에 의해 처리되었습니다');
+        }
+        // 그 사이 다른 요청이 처리를 끝내고 완전히 새로운 환불(새 깃발)을 시작한 것. 이건 실제로 "진행 중"
+        // (연장으로 인해 만료 시각은 항상 미래이므로 만료 여부 비교는 더 이상 의미가 없다.)
+        if (currentLock.paymentCancelId !== staleLock.paymentCancelId) {
+          throw new DomainConflictError('환불 진행 중인 상품입니다');
+        }
 
-      if (inquiryResult === PgCancelInquiryResult.SUCCEEDED) {
-        await this.refundRepository.succeedPaymentCancel(
-          staleLock.paymentCancelId,
-          new Date(),
-          tx,
-        );
-        await this.refundRepository.deleteRefundLock(
-          orderItemId,
+        // PG 조회 중(상태 확인) 뒤늦은 콜백이 먼저 도착해 이미 확정됐을 수 있다(락은 아직 제거하지 않음, ✌️ 부분을 진행 중일때) -
+        // 실측된 콜백 결과가 PG 재조회보다 신뢰도가 높으므로 그 결과를 그대로 존중한다.
+        const paymentCancel = await this.refundRepository.getPaymentCancelById(
           staleLock.paymentCancelId,
           tx,
         );
-        return true;
-      }
+        if (paymentCancel.status !== PrismaPaymentCancelStatus.REQUESTED) {
+          await this.refundRepository.deleteRefundLock(
+            orderItemId,
+            staleLock.paymentCancelId,
+            tx,
+          );
+          return {
+            idempotencyKey: paymentCancel.idempotencyKey,
+            succeeded:
+              paymentCancel.status === PrismaPaymentCancelStatus.SUCCEEDED,
+            failureReason: paymentCancel.failureReason,
+          };
+        }
 
-      if (inquiryResult === PgCancelInquiryResult.FAILED) {
-        await this.refundRepository.failPaymentCancel(
-          staleLock.paymentCancelId,
-          'PG가 취소를 실패 처리함',
-          undefined,
-          new Date(),
-          tx,
-        );
-        await this.refundRepository.deleteRefundLock(
-          orderItemId,
-          staleLock.paymentCancelId,
-          tx,
-        );
-        return false;
-      }
+        // paymentCancel의 상태가 아직 REQUESTED(callback 응답을 받기전)
+        // - PG 상태 조회 결과로 업데이트
+        if (inquiryResult === PgCancelInquiryResult.SUCCEEDED) {
+          await this.refundRepository.succeedPaymentCancel(
+            staleLock.paymentCancelId,
+            new Date(),
+            tx,
+          );
+          await this.refundRepository.deleteRefundLock(
+            orderItemId,
+            staleLock.paymentCancelId,
+            tx,
+          );
+          return {
+            idempotencyKey: paymentCancel.idempotencyKey,
+            succeeded: true,
+            failureReason: null,
+          };
+        }
 
-      // NOT_FOUND: 요청이 PG에 도달하지 않은 것으로 판단하고 안전하게 재시도를 허용한다.
-      await this.refundRepository.failPaymentCancel(
-        staleLock.paymentCancelId,
-        'PG 미도달(거래 없음)',
-        PaymentCancelFailureCode.PG_NOT_REACHED,
-        new Date(),
-        tx,
-      );
-      await this.refundRepository.deleteRefundLock(
-        orderItemId,
-        staleLock.paymentCancelId,
-        tx,
-      );
-      return false;
-    });
+        if (inquiryResult === PgCancelInquiryResult.FAILED) {
+          const failureReason = 'PG가 취소를 실패 처리함';
+          await this.refundRepository.failPaymentCancel(
+            staleLock.paymentCancelId,
+            failureReason,
+            undefined,
+            new Date(),
+            tx,
+          );
+          await this.refundRepository.deleteRefundLock(
+            orderItemId,
+            staleLock.paymentCancelId,
+            tx,
+          );
+          return {
+            idempotencyKey: paymentCancel.idempotencyKey,
+            succeeded: false,
+            failureReason,
+          };
+        }
+
+        if (inquiryResult === PgCancelInquiryResult.IN_PROGRESS) {
+          // PG가 요청을 접수했고 아직 처리 중 - 확정할 수 없다. 낡은 락이 아니라
+          // "정상적으로 진행 중"임이 확인되었으므로, 짧은 조회용 TTL 대신 원래의
+          // 락 만료 정책(1분)에 준하는 시간으로 재연장해 불필요한 재조회를 막는다.
+          await this.refundRepository.extendRefundLock(
+            orderItemId,
+            staleLock.paymentCancelId,
+            new Date(Date.now() + 1 * 60 * 1000),
+            tx,
+          );
+          throw new DomainConflictError('환불 진행 중인 상품입니다');
+        }
+
+        if (inquiryResult === PgCancelInquiryResult.NOT_FOUND) {
+          // 요청이 PG에 도달하지 않은 것으로 판단하고 안전하게 재시도를 허용한다.
+          const failureReason = 'PG 미도달(거래 없음)';
+          await this.refundRepository.failPaymentCancel(
+            staleLock.paymentCancelId,
+            failureReason,
+            PaymentCancelFailureCode.PG_NOT_REACHED,
+            new Date(),
+            tx,
+          );
+          await this.refundRepository.deleteRefundLock(
+            orderItemId,
+            staleLock.paymentCancelId,
+            tx,
+          );
+          return {
+            idempotencyKey: paymentCancel.idempotencyKey,
+            succeeded: false,
+            failureReason,
+          };
+        }
+
+        // 정의되지 않은 조회 결과 - 안전한 확정 방법을 알 수 없으므로 락은
+        // 그대로 두고(삭제/연장 없이) 예외로 즉시 드러낸다. enum에 새 값이
+        // 추가되었는데 분기 처리를 빠뜨린 경우를 컴파일 타임에 감지하기 위한 장치.
+        // 도메인 에러로 감싸지 않고 그대로 재던져 500으로 노출한다 - 이건
+        // "진행 중" 같은 정상적인 충돌 상황이 아니라 시스템이 처리할 줄 모르는
+        // 예상 밖의 상태이므로, 사용자에게 잘못된 신호(409 등)를 주면 안 된다.
+        try {
+          return assertNever(inquiryResult, 'clearStaleLock/inquiryResult');
+        } catch (error) {
+          const detail =
+            error instanceof UnhandledCaseError
+              ? `label=${error.label}, value=${JSON.stringify(error.value)}`
+              : error instanceof Error
+                ? error.message
+                : String(error);
+          this.transactionLoggerService.logRefund(
+            staleLock.paymentCancelId,
+            orderId,
+            orderItemId,
+            userId,
+            paymentCancel.amount,
+            `PG 거래조회 결과 처리 불가(미정의 상태값): ${detail}`,
+          );
+          throw error;
+        }
+      },
+    );
+    return settlement;
   }
 
+  // 상태 확정(succeedPaymentCancel/failPaymentCancel)과 락 삭제(deleteRefundLock)를
+  // 하나의 트랜잭션으로 묶지 않는다 - 의도적인 선택이다.
+  // - 묶었을 때의 문제: 락 삭제가 실패하면(DB 커넥션 순간 끊김 등) 상태 확정까지
+  //   함께 롤백된다. 그러면 PG는 이미 처리를 끝냈는데 우리 시스템만 REQUESTED로
+  //   남아, 상태 확정이 "누군가 같은 상품에 대해 다시 refund()를 호출해줘야만"
+  //   뒤늦게 반영되는 트리거 의존적 지연이 생긴다. 재요청이 없으면 기약 없이
+  //   방치될 수 있고, 그 사이 사용자에게는 실제(PG 기준 완료)와 다른 상태(REQUESTED)가
+  //   노출된다.
+  // - 그래서 분리한다: 상태 확정(되돌릴 수 없는 진실)을 먼저 확실히 반영하고,
+  //   락 삭제(실패해도 회복 가능한 부산물)는 그 뒤에 별도로 시도한다.
+  // - 분리로 인해 생기는 대가: 상태 확정 직후, 락 삭제(바로 아래 deleteRefundLock)
+  //   직전 사이에 짧은 간극이 생긴다. 이 간극에 clearStaleLock의 재조회가 끼어들면
+  //   "락은 아직 있는데 상태는 이미 확정됨"인 경우를 만날 수 있다. 이건
+  //   clearStaleLock 쪽에서 PG 재조회 결과보다 이미 확정된 상태를 우선 신뢰하는
+  //   방식으로 흡수한다(refund.service.ts의 clearStaleLock, PrismaPaymentCancelStatus
+  //   !== REQUESTED 분기 참고).
   async callback(
     success: boolean,
     paymentCancelId: string,
@@ -313,11 +503,12 @@ export class RefundService {
         reason ?? 'PG 응답 실패',
       );
     }
-
-    // deleteLock 자체가 where 절에 paymentCancelId(소유권)를 포함하므로,
-    // 재시도가 이미 이 orderItem의 락을 다른 paymentCancelId로 점유했다면
-    // 조건에 맞는 행이 없어 조용히 무시된다(다른 시도의 락을 건드리지 않음).
-    await this.refundRepository.deleteLock(orderItemId, paymentCancelId);
+    // ✌️
+    // deleteRefundLock 자체가 where 절에 paymentCancelId(소유권)를 포함하므로,
+    // 이 콜백이 처리되는 사이 사용자의 새 환불 요청이 clearStaleLock을 거쳐
+    // 이미 이 orderItem의 락을 다른 paymentCancelId(새 PaymentCancel)로
+    // 점유했다면 조건에 맞는 행이 없어 조용히 무시된다(다른 시도의 락을 건드리지 않음).
+    await this.refundRepository.deleteRefundLock(orderItemId, paymentCancelId);
   }
 
   async getRefundHistoryByShop(shopId: string, status?: PaymentCancelStatus) {
@@ -333,5 +524,33 @@ export class RefundService {
       userId,
       status ? paymentCancelStatusMap[status] : undefined,
     );
+  }
+}
+
+type UsageTicketSnapshot = Pick<
+  NonNullable<Awaited<ReturnType<RefundRepository['getTicketById']>>>,
+  'type' | 'activatedAt' | 'remainingMinutes' | 'purchasedMinutes'
+> & {
+  usageSessions: unknown[];
+};
+
+// 사용 이력이 없으면 true(자동 처리 대상), 있으면 false(승인 대기 대상).
+// ACTIVE 세션이 있으면 remainingMinutes가 아직 차감 전(사후 정산 방식 - UsageSession
+// 종료 시점에야 Ticket.remainingMinutes에 반영됨)이라도 무조건 사용 이력 있음으로 본다.
+function isUnusedTicket(ticket: UsageTicketSnapshot): boolean {
+  if (ticket.usageSessions.length > 0) return false;
+
+  switch (ticket.type) {
+    case TicketType.PERIOD:
+      return ticket.activatedAt === null;
+    case TicketType.TIME:
+      // 필드 이상(둘 다 null 등)은 보수적으로 "사용 이력 있음"으로 처리해 승인 대기로 보낸다
+      return (
+        ticket.remainingMinutes !== null &&
+        ticket.purchasedMinutes !== null &&
+        ticket.remainingMinutes === ticket.purchasedMinutes
+      );
+    default:
+      return assertNever(ticket.type, 'refund.service/isUnusedTicket');
   }
 }

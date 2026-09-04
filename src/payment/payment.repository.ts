@@ -53,7 +53,7 @@ export class PaymentRepository {
         data: {
           type: PaymentType.CARD,
           status: PaymentStatus.PENDING,
-          price: order.totalAmount,
+          amount: order.totalAmount,
           orderId,
           van,
           requestedAt: now,
@@ -137,7 +137,7 @@ export class PaymentRepository {
       where: { pgTransactionId },
       select: {
         id: true,
-        price: true,
+        amount: true,
         status: true,
         order: {
           select: {

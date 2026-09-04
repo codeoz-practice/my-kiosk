@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { assertDefined } from './assert.util';
+import { assertDefined } from '@felix_ys/ts-utils';
 
 /**
  * access token 만료 시간(분)을 설정(jwt.accessExpiresMinutes)에서 읽는다.

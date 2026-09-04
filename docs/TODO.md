@@ -40,48 +40,46 @@
 
 ## 환불(PaymentCancel) 동시 진행 방지 — 락 획득/해제 서비스 로직 구현
 
+**관련 코드**: `src/refund/refund.service.ts`, `refund.repository.ts`
 **관련 스키마**: `PaymentCancel`(`status`/`failureReason`), `RefundLock`
 (`prisma/schema.prisma`, 마이그레이션 `20260815091411_add_payment_cancel_status`,
 `20260815091734_add_refund_lock`)
 
-### 문제
+### 현재 상태 (2026-09-05)
 
-동일 `OrderItem`에 대한 환불 요청이 동시에 여러 번 들어오면(네트워크 재시도,
-중복 클릭 등) 잔여 환불 가능 금액이 미확정인 상태에서 중복 처리되어 원가를
-초과 환불할 위험이 있다. 이를 막기 위한 스키마(`RefundLock`, `PaymentCancelStatus`)는
-준비됐지만, 실제로 이를 사용하는 서비스 로직은 아직 작성되지 않았다.
+**구현 완료** — 미사용 자동 처리 경로에 한정. 상세 흐름은
+[환불_처리_시퀀스.md](./환불_처리_시퀀스.md), 설계는
+[환불_동시_진행_방지_프로세스.md](./architecture/환불_동시_진행_방지_프로세스.md) 참고.
 
-### 구현해야 할 것
+- 락 획득/해제, 만료된 락의 PG 재조회 기반 자가 치유(TTL) — 구현됨
+- 금액 정합성 검증(`calculateRefundableAmount`) — 구현됨
+- PG 호출 및 미확정 처리(응답 실패 시 `REQUESTED`+락 유지, 콜백/TTL 만료로
+  후속 처리) — 구현됨. 다만 원래 계획한 "동기 재시도(2~3회)"가 아니라
+  실패 즉시 방치하는 방식으로 구현됨(재시도 레이어는 아직 없음)
+- 사용 이력이 있는 건(점주 승인 대상)의 락 획득 — **미구현**. 승인 시점에
+  걸 예정이나 승인 API 자체가 없음
+- 환불 확정 시 `Ticket` 상태 갱신 — **미구현**(구조적 위험 있음, 아래 참고)
+- 클라이언트 통지 경로(폴링/웹훅) — 미구현
 
-1. **락 획득**: `PaymentCancel` + `PaymentCancelItem` 생성과 같은 트랜잭션에서
-   대상 `orderItemId`마다 `RefundLock` 행을 함께 INSERT. 이미 락이 있으면(PK
-   충돌) "이미 처리 중" 응답으로 거부.
-   - INSERT 전에 만료된 락(`expiresAt < now()`)은 먼저 DELETE하여 자가 치유.
-2. **금액 정합성 검증**: 락 획득 직후, 같은 트랜잭션 안에서 "이 `orderItemId`에
-   대해 이미 확정 성공(`SUCCEEDED`)한 취소 금액 합계 + 이번 요청 금액 ≤
-   `OrderItem.price`"를 검증. `RefundLock`은 동시 중복만 막을 뿐 순차적인
-   누적 초과 환불은 막지 못하므로 별도 필요.
-3. **PG 호출**: 검증 통과 후 PG 취소 API 호출. 정상 경로는 동기 응답,
-   실패 시 짧은 재시도(예: 2~3회, 5~10초) — 공통 PG 연동 레이어에 정책 위치.
-4. **확정 처리**: PG 응답을 받으면 같은 트랜잭션 안에서
-   `PaymentCancel.status`를 `SUCCEEDED`/`FAILED`로 갱신하고, 관련
-   `RefundLock` 행을 DELETE.
-5. **미확정 처리**: 재시도 예산을 다 쓰고도 응답이 없으면 `status`는
-   `REQUESTED`로 유지, 클라이언트에는 "확인 중" 상태로 즉시 응답하고 이후
-   확정 결과를 받을 경로(폴링/알림)가 필요.
-6. **TTL 정리**: `RefundLock.expiresAt` 만료 후 자가 치유(다음 락 획득 시도
-   시 정리)만으로 충분하지만, 필요하면 주기적 청소 배치(BullMQ repeatable
-   job)를 추가로 고려.
+### ⚠️ 남은 구조적 문제
+
+`RefundService.callback()`이 환불 성공 시 `Ticket`을 전혀 갱신하지 않는다.
+그 결과 이중 환불을 막는 게 사실상 `createRefundWithLock`의
+`refund_amount > refundable_amount` 비교 하나뿐이다. 점주 승인 API를
+구현할 때 `callback()`/`clearStaleLock()` 확정 분기에 `Ticket` 갱신을
+반드시 함께 추가해야 한다. 자세한 내용은
+[환불_프로세스.md §6](./architecture/환불_프로세스.md#6-티켓-상태-반영) 참고.
+
+또한 하나의 `OrderItem`에 대해 여러 번 부분 환불이 누적될 수 있다는
+현재 설계(`calculateRefundableAmount`)도 재검토 대상이다 — 이용 중인
+이용권의 환불은 상품당 1회, 그 즉시 종료가 맞는 모델이라는 재정의가
+있었으나 아직 코드에 반영되지 않았다.
 
 ### 참고
 
 설계 논의 및 기각된 대안(멱등키 단독 사용, `PaymentCancelItem`에 상태
 denormalize)은 Claude 메모리
 `project-refund-cancel-concurrency-design`에 정리되어 있음.
-
-### 현재 상태
-
-미구현. 스키마(`PaymentCancelStatus`, `RefundLock`)만 준비된 상태.
 
 ---
 

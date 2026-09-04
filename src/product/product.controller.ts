@@ -26,7 +26,7 @@ export class ProductController {
       return await this.service.createTimeProduct(shopId, {
         ticketType: 'TIME',
         name: dto.name,
-        price: dto.price,
+        amount: dto.amount,
         usableDays: dto.usableDays,
         isActive: dto.isActive,
         purchasedMinutes: dto.purchasedMinutes!,
@@ -35,7 +35,7 @@ export class ProductController {
     return await this.service.createPeriodProduct(shopId, {
       ticketType: 'PERIOD',
       name: dto.name,
-      price: dto.price,
+      amount: dto.amount,
       usableDays: dto.usableDays,
       isActive: dto.isActive,
       purchasedDurationDays: dto.purchasedDurationDays!,
