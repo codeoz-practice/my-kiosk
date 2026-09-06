@@ -31,7 +31,7 @@ export class RefundController {
   }
 
   @Post('callback')
-  async callbackRefund(dto: PgRefundCallbackDto) {
+  async callbackRefund(@Body() dto: PgRefundCallbackDto) {
     await this.refundService.callback(
       dto.success,
       dto.paymentCancelId,

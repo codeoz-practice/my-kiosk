@@ -33,7 +33,7 @@ export class RefundService {
     if (!ticket) {
       throw new DomainNotFoundError('티켓이 존재하지 않습니다');
     }
-    if (!ticket.userId || userId === ticket.userId) {
+    if (!ticket.userId || userId !== ticket.userId) {
       throw new DomainForbiddenError('자신의 티켓만 환불 가능합니다');
     }
     if (!ticket.orderItem?.id) {
