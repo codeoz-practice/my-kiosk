@@ -67,6 +67,7 @@ Table tickets {
   activationDeadline DateTime
   activatedAt DateTime
   expiresAt DateTime
+  revokedAt DateTime
   orderItem order_items [not null]
   user user [not null]
   createdAt DateTime [default: `now()`, not null]
@@ -134,7 +135,7 @@ Table order_items {
   ticket tickets
   product products [not null]
   order orders [not null]
-  paymentCancelItem payment_cancel_items [not null]
+  paymentCancels payment_cancels [not null]
   refundLock refund_locks
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
@@ -172,19 +173,9 @@ Table payment_cancels {
   cancelledAt DateTime
   failedAt DateTime
   payment payments [not null]
-  paymentCancelItem payment_cancel_items [not null]
-  locks refund_locks [not null]
-}
-
-Table payment_cancel_items {
-  id String [pk]
-  paymentCancelId String [not null]
   orderItemId String [not null]
-  amount Int [not null]
-  paymentCancel payment_cancels [not null]
   orderItem order_items [not null]
-  createdAt DateTime [default: `now()`, not null]
-  updatedAt DateTime [not null]
+  locks refund_locks [not null]
 }
 
 Table refund_locks {
@@ -370,9 +361,7 @@ Ref: payments.orderId > orders.id
 
 Ref: payment_cancels.paymentId > payments.id
 
-Ref: payment_cancel_items.paymentCancelId > payment_cancels.id
-
-Ref: payment_cancel_items.orderItemId > order_items.id
+Ref: payment_cancels.orderItemId > order_items.id
 
 Ref: refund_locks.orderItemId - order_items.id
 

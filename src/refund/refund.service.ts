@@ -3,6 +3,7 @@ import {
   PaymentCancelFailureCode,
   PaymentCancelStatus as PrismaPaymentCancelStatus,
   RefundLock,
+  TicketStatus,
   TicketType,
 } from '@prisma/client';
 import { RefundRepository } from './refund.repository';
@@ -24,6 +25,11 @@ import { assertNever, UnhandledCaseError } from '@felix_ys/ts-utils';
 // 만료된 락을 PG 조회하는 동안 선점(연장)해두는 시간 - 조회 타임아웃 예상치보다 여유 있게 설정
 const pgInquiryLockTtlMs = 30 * 1000;
 
+// refund() 공통 검증을 통과한 뒤 processAutoRefund/processPendingApproval에 넘기는 티켓 스냅샷
+type RefundTicketSnapshot = NonNullable<
+  Awaited<ReturnType<RefundRepository['getTicketById']>>
+>;
+
 /**
  * `RefundLock`: "지금 이 상품(orderItem)에 대해 누군가 환불을 진행 중이다"라는 깃발
  * - 깃발이 없으면 → 아무도 진행 중이지 않으니 새로 시작
@@ -40,11 +46,12 @@ export class RefundService {
 
   /**
    * - 환불은 상품(orderItem) 단위로 이루어진다
+   * - 하나의 상품은 환불 1회로 종료된다(이미 REVOKED/환불 완료된 티켓은 재환불 불가)
    * - 동일한 상품에 대해서 동시에 환불이 진행되지 않는다
-   * - 사용 이력이 없는 건(미사용)만 이 메서드 안에서 자동으로 락 획득/PG 요청까지
-   *   처리한다. 금액은 고객이 지정하지 않고 서버가 원가 전액으로 계산한다
-   * - 사용 이력이 있는 건은 점주 승인이 필요하므로, 이 메서드는 승인 대기 상태의
-   *   PaymentCancel만 만들고 락 없이 종료한다(승인/거절 처리는 이 메서드의 책임이 아니다)
+   * - 사용 이력이 없는 건(미사용)만 자동으로 락 획득/PG 요청까지 처리한다
+   *   (processAutoRefund). 금액은 고객이 지정하지 않고 서버가 원가 전액으로 계산한다
+   * - 사용 이력이 있는 건은 점주 승인이 필요하므로, 승인 대기 상태의 PaymentCancel만
+   *   만들고 락 없이 종료한다(processPendingApproval, 승인/거절 처리는 별도 책임)
    * - 환불 요청의 상태 확정은 PG의 응답(callback, inquiryPaymentCancel)에 대해서만 확정 짓는다
    * - 락이 존재하는 상품은 그 환불 요청이 확정되지 않으면 다음 환불 요청 진행이 불가하다
    * - 락이 만료됐지만 확정되지 않은 요청은, 다음 환불 요청이 PG에 재조회해 스스로 확정 짓는다
@@ -58,7 +65,7 @@ export class RefundService {
     ticketId: string,
     idempotencyKey?: string,
   ): Promise<RefundResult> {
-    // 1️⃣ 검증
+    // 공통 검증
     const ticket = await this.refundRepository.getTicketById(ticketId);
 
     if (!ticket) {
@@ -66,6 +73,11 @@ export class RefundService {
     }
     if (!ticket.userId || userId !== ticket.userId) {
       throw new DomainForbiddenError('자신의 티켓만 환불 가능합니다');
+    }
+    // 하나의 상품은 환불 1회로 종료되므로, 이미 환불 처리된 티켓은 락 획득 전에
+    // 저렴하게 즉시 거부한다(createRefundWithLock의 already_refunded 검증과 이중 방어).
+    if (ticket.status === TicketStatus.REVOKED) {
+      throw new DomainConflictError('이미 환불 처리된 티켓입니다');
     }
     if (!ticket.orderItem?.id) {
       throw new DomainNotFoundError('주문 정보가 존재하지 않습니다');
@@ -75,21 +87,38 @@ export class RefundService {
       throw new DomainNotFoundError('결재 정보가 존재하지 않습니다');
     }
 
-    // 1.5️⃣ 사용 이력 분기 - 재량이 필요 없는 미사용 건만 이 요청 안에서 자동 처리한다.
-    // 사용 이력이 있으면 점주 승인 없이는 금액/락을 확정할 수 없으므로 여기서 멈춘다.
+    // 사용 이력 분기 - 재량이 필요 없는 미사용 건만 자동 처리한다.
     if (!isUnusedTicket(ticket)) {
-      const pending =
-        await this.refundRepository.createPendingApprovalPaymentCancel(
-          payment.id,
-          ticket.orderItem.id,
-          new Date(),
-          idempotencyKey,
-        );
-      return { status: 'PENDING_APPROVAL', paymentCancelId: pending.id };
+      return this.processPendingApproval(ticket, payment, idempotencyKey);
     }
+    return this.processAutoRefund(ticket, payment, userId, idempotencyKey);
+  }
 
+  // 사용 이력이 있는 건 - 점주 승인 없이는 금액/락을 확정할 수 없으므로
+  // 승인 대기 상태의 PaymentCancel만 만들고 멈춘다.
+  private async processPendingApproval(
+    ticket: RefundTicketSnapshot,
+    payment: { id: string },
+    idempotencyKey?: string,
+  ): Promise<RefundResult> {
+    const pending =
+      await this.refundRepository.createPendingApprovalPaymentCancel(
+        payment.id,
+        ticket.orderItem.id,
+        new Date(),
+        idempotencyKey,
+      );
+    return { status: 'PENDING_APPROVAL', paymentCancelId: pending.id };
+  }
+
+  // 미사용 건 - 재량이 필요 없으므로 이 요청 안에서 락 획득부터 PG 요청까지 처리한다.
+  private async processAutoRefund(
+    ticket: RefundTicketSnapshot,
+    payment: { id: string },
+    userId: string,
+    idempotencyKey?: string,
+  ): Promise<RefundResult> {
     // 2️⃣ 낡은 락(만료됐는데 아무도 후속 처리를 안 해서 방치된 락)이 있으면 정리한다.
-    // (미사용 자동 처리 경로 - 이하 3️⃣, 4️⃣도 이 경로 전용)
     const staleLock = await this.acquireStaleLock(ticket.orderItem.id);
     if (staleLock) {
       // 낡은 깃발(만료된 락)을 PG에 진실을 물어 정리한다. 정리와 별개로,
@@ -170,38 +199,25 @@ export class RefundService {
           throw new DomainConflictError('환불 진행 중인 상품입니다');
         }
 
-        // 환불 가능 금액 계산 - 미사용 건은 원가 전액(refund_amount)이 유일하게 허용되는 값.
-        // refund_amount는 OrderItem 원가 자체라 상수이고, refundable_amount는 거기서
-        // 이미 SUCCEEDED로 취소된 금액을 뺀 값이다.
+        // 환불 가능 금액 계산 - 하나의 상품은 환불 1회로 종료되므로, 이미 SUCCEEDED된
+        // 이력이 있으면(already_refunded) 원가와 무관하게 재환불 자체가 불가하다.
+        // refund()의 REVOKED 검증과 이중 방어 - 그 사이 레이스로 상태가 바뀌었거나
+        // (극히 드묾) 아직 Ticket 갱신 전의 과거 데이터를 대비한 안전장치.
         const refund = await this.refundRepository.calculateRefundableAmount(
           orderItemId,
           tx,
         );
-        const finalRefundAmount = refund.refund_amount;
-
-        // 이중 환불 방지: 이 티켓으로 이미 전액 환불(SUCCEEDED)이 끝났다면
-        // refundable_amount가 0으로 줄어 있다. callback()이 성공 처리 시 Ticket을
-        // 갱신하지 않으므로(activatedAt/remainingMinutes가 그대로 남음) 같은 티켓으로
-        // 다시 요청해도 isUnusedTicket()이 또 true를 반환한다 - RefundLock도 첫 환불
-        // 완료 시 삭제되어 재시도를 막지 못하므로, 이 비교가 이중 환불을 막는 유일한
-        // 장치다. Ticket 상태 전이(문서 환불_프로세스.md §6)가 구현되면 그쪽에서 먼저
-        // 막힐 수 있지만, 그때도 이 검증 자체는 유지해야 한다.
-        if (finalRefundAmount > (refund.refundable_amount ?? 0)) {
-          throw new DomainConflictError('환불 가능 금액을 초과했습니다');
+        if (refund.already_refunded) {
+          throw new DomainConflictError('이미 환불 처리된 상품입니다');
         }
+        const finalRefundAmount = refund.refund_amount;
 
         const paymentCancel = await this.refundRepository.createPaymentCancel(
           finalRefundAmount,
           paymentId,
+          orderItemId,
           new Date(),
           idempotencyKey,
-          tx,
-        );
-
-        await this.refundRepository.createPaymentCancelItem(
-          paymentCancel.id,
-          orderItemId,
-          finalRefundAmount,
           tx,
         );
 
@@ -255,10 +271,17 @@ export class RefundService {
     });
   }
 
-  // acquireStaleLock으로 선점해둔 낡은 깃발(만료된 락)을 PG에 진실을 물어 정리한다.
-  // 정리 자체(확정 처리 + 락 삭제)는 무조건 수행하고, 그 결과(성공/실패)와 그
-  // 시도가 어떤 idempotencyKey로 만들어졌는지를 호출부에 반환한다. "이 결과를
-  // 이번 요청의 결과로 재현해도 되는지"는 호출부가 idempotencyKey를 비교해서 판단한다.
+  /**
+   * acquireStaleLock으로 선점한 만료 락을 PG에 조회해 확정 처리하고 락을 삭제한다.
+   * 확정 결과(성공/실패)와 원래 요청의 idempotencyKey를 반환하며,
+   * 호출부가 해당 결과를 현재 요청의 응답으로 재현할지 여부를 판단한다.
+   * @param orderId PG 거래조회에 사용할 주문 ID
+   * @param orderItemId 락 조회·삭제 및 티켓 무효화에 사용할 주문 상품 ID
+   * @param userId PG 거래조회에 사용할 사용자 ID
+   * @param staleLock acquireStaleLock으로 선점해둔 만료 RefundLock
+   * @returns idempotencyKey(원 요청 키), succeeded(환불 성공 여부), failureReason(실패 사유)
+   * @throws DomainConflictError PG 조회 실패 / 락이 이미 다른 요청에 의해 정리된 경우 / 새 환불이 진행 중인 경우
+   */
   private async clearStaleLock(
     orderId: string,
     orderItemId: string,
@@ -346,8 +369,9 @@ export class RefundService {
         // paymentCancel의 상태가 아직 REQUESTED(callback 응답을 받기전)
         // - PG 상태 조회 결과로 업데이트
         if (inquiryResult === PgCancelInquiryResult.SUCCEEDED) {
-          await this.refundRepository.succeedPaymentCancel(
+          await this.refundRepository.confirmRefundSuccess(
             staleLock.paymentCancelId,
+            orderItemId,
             new Date(),
             tx,
           );
@@ -486,7 +510,14 @@ export class RefundService {
     if (success) {
       // 금액 비교 - PG가 실패로 응답한 경우 금액 비교는 의미가 없으므로 성공 시에만 검사한다
       if (refundedAmount === paymentCancel.amount) {
-        await this.refundRepository.succeedPaymentCancel(paymentCancelId);
+        await this.refundRepository.runInTransaction((tx) =>
+          this.refundRepository.confirmRefundSuccess(
+            paymentCancelId,
+            orderItemId,
+            new Date(),
+            tx,
+          ),
+        );
       } else {
         // 잘못된 환불 금액에 대한 처리 - 그대로 성공 처리하지 않고 실패로 확정한다
         // 🔥 관리자가 확인: 상황 자체가 **정상 흐름이 아니라 이상 상황(PG 연동 버그, PG 측 처리 오류)**이기 때문
@@ -528,7 +559,7 @@ export class RefundService {
 }
 
 type UsageTicketSnapshot = Pick<
-  NonNullable<Awaited<ReturnType<RefundRepository['getTicketById']>>>,
+  RefundTicketSnapshot,
   'type' | 'activatedAt' | 'remainingMinutes' | 'purchasedMinutes'
 > & {
   usageSessions: unknown[];

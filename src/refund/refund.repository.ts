@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   PaymentCancelFailureCode,
   PaymentCancelStatus,
-  PaymentStatus,
+  TicketStatus,
   UsageSessionStatus,
 } from '@prisma/client';
 import { PrismaService, TransactionClient } from 'src/prisma/prisma.service';
@@ -35,6 +35,7 @@ export class RefundRepository {
       select: {
         userId: true,
         type: true,
+        status: true,
         activatedAt: true,
         remainingMinutes: true,
         purchasedMinutes: true,
@@ -70,6 +71,7 @@ export class RefundRepository {
   async createPaymentCancel(
     amount: number,
     paymentId: string,
+    orderItemId: string,
     requestedAt: Date,
     idempotencyKey?: string,
     client: TransactionClient | PrismaService = this.prisma,
@@ -78,6 +80,7 @@ export class RefundRepository {
       data: {
         amount,
         paymentId,
+        orderItemId,
         requestedAt,
         idempotencyKey,
         status: PaymentCancelStatus.REQUESTED,
@@ -86,19 +89,19 @@ export class RefundRepository {
   }
 
   // 같은 orderItemId로 이미 승인 대기 중인 요청이 있는지 확인한다(중복 신청 방지용).
-  async getPendingApprovalPaymentCancelItem(
+  async getPendingApprovalPaymentCancel(
     orderItemId: string,
     client: TransactionClient | PrismaService = this.prisma,
   ) {
-    return await client.paymentCancelItem.findFirst({
+    return await client.paymentCancel.findFirst({
       where: {
         orderItemId,
-        paymentCancel: { status: PaymentCancelStatus.PENDING_APPROVAL },
+        status: PaymentCancelStatus.PENDING_APPROVAL,
       },
     });
   }
 
-  // 사용 이력 있는 건 - 점주 승인 대기 상태로만 PaymentCancel/PaymentCancelItem을 생성한다.
+  // 사용 이력 있는 건 - 점주 승인 대기 상태로만 PaymentCancel을 생성한다.
   // 금액은 아직 확정되지 않으므로(점주가 승인 시점에 입력) 0으로 저장한다.
   // RefundLock은 만들지 않는다 - 아직 PG에 아무 요청도 나가지 않아 락으로 막을 대상(PG
   // 취소 실행 중복)이 없기 때문이다. 대신 같은 orderItemId의 중복 신청은 이 메서드
@@ -110,7 +113,7 @@ export class RefundRepository {
     idempotencyKey?: string,
   ) {
     return this.runInTransaction(async (tx) => {
-      const existing = await this.getPendingApprovalPaymentCancelItem(
+      const existing = await this.getPendingApprovalPaymentCancel(
         orderItemId,
         tx,
       );
@@ -120,40 +123,16 @@ export class RefundRepository {
         );
       }
 
-      const paymentCancel = await tx.paymentCancel.create({
+      return await tx.paymentCancel.create({
         data: {
           amount: 0,
           paymentId,
+          orderItemId,
           requestedAt,
           idempotencyKey,
           status: PaymentCancelStatus.PENDING_APPROVAL,
         },
       });
-
-      await tx.paymentCancelItem.create({
-        data: {
-          paymentCancelId: paymentCancel.id,
-          orderItemId,
-          amount: 0,
-        },
-      });
-
-      return paymentCancel;
-    });
-  }
-
-  async createPaymentCancelItem(
-    paymentCancelId: string,
-    orderItemId: string,
-    amount: number,
-    client: TransactionClient | PrismaService = this.prisma,
-  ) {
-    await client.paymentCancelItem.create({
-      data: {
-        paymentCancelId,
-        orderItemId,
-        amount,
-      },
     });
   }
 
@@ -194,7 +173,9 @@ export class RefundRepository {
     return count;
   }
 
-  // 환불 가능 금액 계산
+  // 환불 가능 금액 계산 - 상품(OrderItem)은 환불 1회로 종료되므로(부분/재환불 없음),
+  // "얼마나 환불 가능한지"가 아니라 "이미 환불된 적 있는지"만 확인하면 된다.
+  // already_refunded가 true면 원가(refund_amount)와 무관하게 재환불은 항상 불가.
   async calculateRefundableAmount(
     orderItemId: string,
     client: TransactionClient | PrismaService = this.prisma,
@@ -203,37 +184,38 @@ export class RefundRepository {
       {
         order_item_id: string;
         refund_amount: number;
-        refund_status: string | null;
-        cancelled_amount: number;
-        refundable_amount: number | null;
+        already_refunded: boolean;
       }[]
     >`
       SELECT
         oi.id AS order_item_id,
-        oi.amount AS refund_amount, -- "결제 예정/완료 금액"
-        p.status AS refund_status,
-        COALESCE(cancel_sum.total_cancelled, 0)::integer AS cancelled_amount, -- 취소된 금액
-        CASE
-            WHEN p.status = 'SUCCESS'
-            THEN (oi.amount - COALESCE(cancel_sum.total_cancelled, 0))::integer
-            ELSE NULL  -- 결제가 성공하지 않았으면 "실제 남은 금액" 자체가 의미 없음
-        END AS refundable_amount
-      FROM order_items oi
-      JOIN orders o ON o.id = oi.order_id
-      LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'SUCCESS'
-      LEFT JOIN (
-          SELECT 
-              pci.order_item_id, 
-              SUM(pci.amount) AS total_cancelled
-          FROM payment_cancel_items pci
-          JOIN payment_cancels pc ON pc.id = pci.payment_cancel_id
+        oi.amount AS refund_amount, -- "결제 예정/완료 금액"(원가, 상수)
+        EXISTS(
+          SELECT 1
+          FROM payment_cancels pc
           WHERE pc.status = 'SUCCEEDED'
-            AND pci.order_item_id = ${orderItemId} 
-          GROUP BY pci.order_item_id
-      ) cancel_sum ON cancel_sum.order_item_id = oi.id
-      WHERE oi.id = ${orderItemId} 
+            AND pc.order_item_id = ${orderItemId}
+        ) AS already_refunded
+      FROM order_items oi
+      WHERE oi.id = ${orderItemId}
     `;
     return refund;
+  }
+
+  // 환불이 확정(SUCCEEDED)된 시점에 해당 상품의 티켓을 무효화한다.
+  // Ticket.orderItemId가 unique라 별도 조회 없이 바로 갱신 가능.
+  // revokedAt은 호출부(succeedPaymentCancel과 같은 트랜잭션)의 now를 그대로
+  // 넘겨받아 PaymentCancel.cancelledAt과 항상 같은 값을 갖도록 강제한다.
+  // confirmRefundSuccess를 통해서만 호출되도록 private로 감춘다(위 참고).
+  private async revokeTicket(
+    orderItemId: string,
+    revokedAt: Date,
+    client: TransactionClient | PrismaService = this.prisma,
+  ) {
+    await client.ticket.update({
+      where: { orderItemId },
+      data: { status: TicketStatus.REVOKED, revokedAt },
+    });
   }
 
   async deleteRefundLock(
@@ -260,7 +242,21 @@ export class RefundRepository {
     });
   }
 
-  async succeedPaymentCancel(
+  // PaymentCancel 확정과 Ticket 무효화는 항상 함께 반영되어야 하는 원자적 세트다.
+  // 이 둘을 개별 호출로 흩어두면 한쪽만 호출하는 실수를 막을 방법이 없으므로,
+  // succeedPaymentCancel/revokeTicket을 private으로 감춰 이 메서드로만 호출되게
+  // 강제한다. tx를 필수로 받아(기본값 없음) 호출부가 반드시 트랜잭션을 열게 한다.
+  async confirmRefundSuccess(
+    paymentCancelId: string,
+    orderItemId: string,
+    confirmedAt: Date,
+    tx: TransactionClient,
+  ) {
+    await this.succeedPaymentCancel(paymentCancelId, confirmedAt, tx);
+    await this.revokeTicket(orderItemId, confirmedAt, tx);
+  }
+
+  private async succeedPaymentCancel(
     paymentCancelId: string,
     now: Date = new Date(),
     client: TransactionClient | PrismaService = this.prisma,
@@ -296,98 +292,24 @@ export class RefundRepository {
     });
   }
 
-  async getRefundByShop2(
-    shopId: string,
-    client: TransactionClient | PrismaService = this.prisma,
-  ) {
-    return await client.order.findMany({
-      where: {
-        shopId,
-        payments: {
-          some: {
-            status: PaymentStatus.SUCCESS,
-            paymentCancels: {
-              some: { status: PaymentCancelStatus.SUCCEEDED },
-            },
-          },
-        },
-      },
-      select: {
-        id: true,
-        totalAmount: true,
-        payments: {
-          where: {
-            status: PaymentStatus.SUCCESS,
-            paymentCancels: {
-              some: { status: PaymentCancelStatus.SUCCEEDED },
-            },
-          },
-          select: {
-            status: true,
-            id: true,
-            paymentCancels: {
-              where: { status: PaymentCancelStatus.SUCCEEDED },
-              select: {
-                id: true,
-                paymentCancelItem: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        id: 'asc',
-      },
-    });
-  }
-
-  // 매장별 환불 내역 조회 ticket or order_item
-  async getRefundByShop(
-    shopId: string,
-    client: TransactionClient | PrismaService = this.prisma,
-  ) {
-    /**
-     * 환불 금액
-     * 환불 시간
-     * 환불 유무
-     *
-     */
-    return await client.$queryRaw`
-      SELECT
-        o.id AS order_id,
-        pci.payment_cancel_id,
-        pci.id AS payment_cancel_items_id,
-        pci.order_item_id,
-        pci.amount
-      FROM
-        orders o
-        JOIN payments pay ON pay.order_id = o.id
-        AND pay.status = 'SUCCESS'
-        JOIN payment_cancels pc ON pc.payment_id = pay.id
-        AND pc.status = 'SUCCEEDED'
-        JOIN payment_cancel_items pci ON pci.payment_cancel_id = pc.id
-      WHERE
-        o.shop_id = ${shopId} 
-      ORDER BY
-        o.id
-    `;
-  }
-
   async getRefundHistoryByShop(
     shopId: string,
     status?: PaymentCancelStatus,
     client: TransactionClient | PrismaService = this.prisma,
   ) {
-    return client.paymentCancelItem.findMany({
+    return client.paymentCancel.findMany({
       where: {
-        paymentCancel: {
-          payment: { order: { shopId } },
-          status,
-        },
+        payment: { order: { shopId } },
+        status,
       },
       select: {
         id: true,
         amount: true,
+        status: true,
+        reason: true,
+        requestedAt: true,
+        cancelledAt: true,
+        failureReason: true,
         orderItem: {
           select: {
             id: true,
@@ -396,18 +318,8 @@ export class RefundRepository {
             ticket: { select: { id: true, status: true } },
           },
         },
-        paymentCancel: {
-          select: {
-            id: true,
-            status: true,
-            reason: true,
-            requestedAt: true,
-            cancelledAt: true,
-            failureReason: true,
-          },
-        },
       },
-      orderBy: { paymentCancel: { requestedAt: 'desc' } },
+      orderBy: { requestedAt: 'desc' },
     });
   }
 
@@ -428,16 +340,12 @@ export class RefundRepository {
               select: {
                 id: true,
                 amount: true,
-                paymentCancelItem: {
+                paymentCancels: {
+                  where: status ? { status } : undefined,
                   select: {
                     id: true,
                     amount: true,
-                    paymentCancel: {
-                      select: {
-                        id: true,
-                        status: true,
-                      },
-                    },
+                    status: true,
                   },
                 },
                 product: {

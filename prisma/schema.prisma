@@ -133,12 +133,22 @@ model Ticket {
   activatedAt DateTime? @map("activated_at")        // 첫 입장(활성화) 시각
   expiresAt DateTime? @map("expires_at")            // ⭐️ 정기권 실제 만료 시각(activatedAt + purchasedDurationDays)
 
+  // 환불 확정(REVOKED 전이) 시각. PaymentCancel.cancelledAt(그 환불 실행 기록의
+  // 확정 시각)과 개념적으로 동일한 순간을 가리키며 같은 트랜잭션에서 함께
+  // 기록되므로 값이 어긋날 일은 없다. 그럼에도 별도 필드로 두는 이유는
+  // "Ticket 하나만 보고 언제 환불됐는지 답할 수 있어야 한다"는 조회 패턴
+  // 때문이다 - updatedAt은 REVOKED 전이가 아닌 다른 갱신(예: 활성화)에도
+  // 함께 변하므로 REVOKED 시각의 근거로 쓸 수 없다. Ticket -> OrderItem ->
+  // PaymentCancel을 매번 조인하는 대신, 다른 스냅샷
+  // 필드(purchasedMinutes 등)와 같은 방식으로 조회 시점의 값을 복제해둔다.
+  revokedAt DateTime? @map("revoked_at")
+
   orderItem OrderItem @relation(fields: [orderItemId], references: [id])
   user User @relation( fields: [userId], references: [id])
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  
+
   // 관리자: 최근 변경된 티켓 목록
   @@index([status, updatedAt])
   
@@ -238,7 +248,7 @@ model OrderItem {
   ticket Ticket?
   product Product @relation(fields: [productId], references: [id])
   order Order @relation(fields: [orderId], references: [id])
-  paymentCancelItem PaymentCancelItem[] // 이 상품에 대한 취소 내역(잔여 사용량 비례 부분 취소 시 여러 건 가능)
+  paymentCancels PaymentCancel[] // 이 상품에 대한 취소 요청 이력(상품당 SUCCEEDED는 최대 1건, FAILED/REQUESTED 포함 시 여러 건 가능)
   refundLock RefundLock? // 이 상품에 대해 현재 진행 중인 환불이 있으면 존재(동시 중복 진행 방지용 락)
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -301,11 +311,11 @@ enum PaymentCancelFailureCode {
   PG_NOT_REACHED  // 락 만료 후 PG 거래조회 결과 "거래 없음" - 요청이 PG에 도달하지 않은 것으로 판단
 }
 
-// PG에 대한 취소 실행 1건"에 대한 정보 모델 (PG사에 요청 실행)
+// PG에 대한 취소 실행 1건에 대한 정보 모델 — 한 번의 취소는 상품(OrderItem) 1건만 대상으로 한다
 model PaymentCancel {
   id        String   @id @default(uuid())
   paymentId String   @map("payment_id")
-  amount    Int                           // 취소 금액 (부분 취소 가능)
+  amount    Int                           // 이 상품에 대한 취소 금액
   reason    String?                       // 취소 사유(고객이 취소를 요청한 이유)
   status    PaymentCancelStatus @default(REQUESTED)
   pgErrorCode String? @map("pg_error_code") // PG가 응답한 원본 에러 코드(PG가 거절한 경우)
@@ -318,33 +328,16 @@ model PaymentCancel {
   failedAt DateTime? @updatedAt @map("failed_at")
 
   payment Payment @relation(fields: [paymentId], references: [id])
-  paymentCancelItem PaymentCancelItem[] // 이 취소 요청에 포함된 상품별 내역
+  orderItemId String @map("order_item_id") // 이 취소 요청의 대상 상품(1:1 — 한 번의 취소는 상품 1건만 대상)
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id])
   locks RefundLock[] // 이 취소 요청이 보유 중인 상품별 락(확정되면 삭제됨)
 
   @@index([paymentId])
+  @@index([orderItemId])
   @@index([status])
   @@index([pgErrorCode])
   @@index([failureCode])
   @@map("payment_cancels")
-}
-
-// 하나의 PG 취소 요청(PaymentCancel)이 어떤 상품(OrderItem)들에 대한 것인지 기록하는 연결 모델
-// 상품별 취소 금액(amount)을 개별로 가지므로, 잔여 사용량 비례 등 **상품 단위 부분 취소**도 표현 가능하다
-model PaymentCancelItem {
-  id              String   @id @default(uuid())
-  paymentCancelId String   @map("payment_cancel_id")
-  orderItemId     String   @map("order_item_id")
-  amount          Int                                 // 이 상품에 대해 취소된 금액(부분 취소 가능)
-
-  paymentCancel PaymentCancel @relation(fields: [paymentCancelId], references: [id])
-  orderItem     OrderItem     @relation(fields: [orderItemId], references: [id])
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  @@index([paymentCancelId])
-  @@index([orderItemId])
-  @@map("payment_cancel_items")
 }
 
 // 상품(OrderItem) 단위 환불 동시 진행 방지용 락 테이블(예약 패턴)

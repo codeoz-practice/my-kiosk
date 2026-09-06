@@ -45,40 +45,100 @@
 (`prisma/schema.prisma`, 마이그레이션 `20260815091411_add_payment_cancel_status`,
 `20260815091734_add_refund_lock`)
 
-### 현재 상태 (2026-09-05)
+### 현재 상태 (2026-09-06)
 
 **구현 완료** — 미사용 자동 처리 경로에 한정. 상세 흐름은
 [환불_처리_시퀀스.md](./환불_처리_시퀀스.md), 설계는
 [환불_동시_진행_방지_프로세스.md](./architecture/환불_동시_진행_방지_프로세스.md) 참고.
 
+- 사용 이력 기반 자동/수동 분기(`isUnusedTicket`) — 구현됨
 - 락 획득/해제, 만료된 락의 PG 재조회 기반 자가 치유(TTL) — 구현됨
 - 금액 정합성 검증(`calculateRefundableAmount`) — 구현됨
 - PG 호출 및 미확정 처리(응답 실패 시 `REQUESTED`+락 유지, 콜백/TTL 만료로
   후속 처리) — 구현됨. 다만 원래 계획한 "동기 재시도(2~3회)"가 아니라
   실패 즉시 방치하는 방식으로 구현됨(재시도 레이어는 아직 없음)
-- 사용 이력이 있는 건(점주 승인 대상)의 락 획득 — **미구현**. 승인 시점에
-  걸 예정이나 승인 API 자체가 없음
-- 환불 확정 시 `Ticket` 상태 갱신 — **미구현**(구조적 위험 있음, 아래 참고)
-- 클라이언트 통지 경로(폴링/웹훅) — 미구현
+- 승인 대기 중 같은 상품 중복 신청 방지 — 구현됨(애플리케이션 레벨 트랜잭션 검사)
 
-### ⚠️ 남은 구조적 문제
+### 미완료 항목
 
-`RefundService.callback()`이 환불 성공 시 `Ticket`을 전혀 갱신하지 않는다.
-그 결과 이중 환불을 막는 게 사실상 `createRefundWithLock`의
-`refund_amount > refundable_amount` 비교 하나뿐이다. 점주 승인 API를
-구현할 때 `callback()`/`clearStaleLock()` 확정 분기에 `Ticket` 갱신을
-반드시 함께 추가해야 한다. 자세한 내용은
-[환불_프로세스.md §6](./architecture/환불_프로세스.md#6-티켓-상태-반영) 참고.
+1. [ ] **점주 승인/거절 API 자체가 없음** (가장 큰 공백)
+   `RefundService.createPendingApprovalPaymentCancel`이 `PaymentCancel`을
+   `PENDING_APPROVAL` 상태로 만드는 것까지는 구현됐지만, 이를 승인하거나
+   거절해서 다음 단계(`RefundLock` 획득 → PG 취소 요청)로 넘기는 API가
+   없다. 사용 이력이 있는 티켓의 환불 신청은 이 상태에서 영구히 멈춘다.
+   구현 시 [환불_프로세스.md §1-3](./architecture/환불_프로세스.md#1-3-신청승인-주체와-채널)의
+   승인 흐름과 아래 2, 3번을 함께 처리해야 한다.
 
-또한 하나의 `OrderItem`에 대해 여러 번 부분 환불이 누적될 수 있다는
-현재 설계(`calculateRefundableAmount`)도 재검토 대상이다 — 이용 중인
-이용권의 환불은 상품당 1회, 그 즉시 종료가 맞는 모델이라는 재정의가
-있었으나 아직 코드에 반영되지 않았다.
+2. [x] **환불 확정 시 `Ticket` 상태 미갱신 — 미사용 자동 처리 경로 해결됨(2026-09-06)**
+   `RefundService.callback()`과 `clearStaleLock()`의 `SUCCEEDED` 확정
+   분기에서 `succeedPaymentCancel`과 같은 트랜잭션으로
+   `RefundRepository.revokeTicket()`을 호출해 `Ticket.status`를
+   `REVOKED`로 전이시킨다. `refund()` 진입 시에도 이미 `REVOKED`인
+   티켓은 락 획득 전에 즉시 거부한다. **다만 점주 승인 경로
+   (`PENDING_APPROVAL`)는 여전히 미해결** — 아래 신규 항목 참고.
+   자세한 내용은 [환불_프로세스.md §6](./architecture/환불_프로세스.md#6-티켓-상태-반영) 참고.
+
+3. [x] **부분 환불 모델 재설계 — 미사용 자동 처리 경로 해결됨(2026-09-06)**
+   "이용 중인 이용권의 환불은 상품당 1회, 그 즉시 종료"라는 재정의를
+   반영해 `calculateRefundableAmount`를 "원가 - 누적 취소액 계산"에서
+   "이미 SUCCEEDED된 이력이 있는지(`already_refunded`) 확인"으로
+   단순화했다. 이미 환불된 상품은 원가와 무관하게 재환불이 무조건
+   거부된다(2번의 `REVOKED` 검증과 이중 방어). **점주 승인 경로가
+   구현되기 전까지는 이 경로가 SUCCEEDED에 도달하지 않으므로, 재설계의
+   효과는 미사용 자동 처리 경로에 한정된다.** 자세한 내용은
+   [환불_상품단위_추적_구조.md](./architecture/환불_상품단위_추적_구조.md)와
+   [환불_스키마_설계_근거_모음.md의 "왜 M:N이 되는가"](./architecture/환불_스키마_설계_근거_모음.md#왜-mn이-되는가) 참고.
+
+4. [ ] **진행 중인 `UsageSession` 처리 정책 미확정**
+   지금은 ACTIVE 세션이 있으면 무조건 "사용 이력 있음"으로만 분류한다.
+   "이용 중에 환불 신청 → 점주가 승인하는 동안 계속 이용"하는 애매한
+   상태를 신청 시점에 아예 막을지, 세션 종료 후에만 신청 가능하게 할지는
+   미결 — [환불_프로세스.md §3](./architecture/환불_프로세스.md#3-환불-대상-검증) 참고.
+
+5. [ ] **Ledger(정산) 연동 미구현**
+   `PaymentCancel.status`가 `SUCCEEDED`로 확정되는 시점에 매장 정산액을
+   차감하거나(`HELD`/`RELEASABLE`) 회수 대상으로 전이(`CLAWBACK_PENDING`)
+   시키는 로직이 전혀 없다 — [환불_프로세스.md §5](./architecture/환불_프로세스.md#5-정산ledger-연동) 참고.
+
+6. [ ] **PG 응답 금액 불일치 시 관리자 알림 미구현**
+   `RefundService.callback()`에서 PG 응답 금액이 요청 금액과 다르면
+   `FAILED`로 확정만 하고, 관리자에게 알리는 로직은 코드에 TODO로만
+   남아있다(`refund.service.ts`의 `callback()` 내부).
+
+7. [ ] **PG 거래조회 자체가 계속 실패하는 경우 무한 방치 가능**
+   `clearStaleLock()`에서 `inquiryPaymentCancel` 호출 자체가 실패("진짜
+   모름")하면 아무것도 확정하지 않고 재시도를 거부하는데, 이 실패가
+   구조적 원인(PG URL 오설정 등)인지 일시적 네트워크 문제인지 구분하지
+   않아 재시도해도 영구히 막힐 수 있다. 관련 메모리:
+   `project-refund-pg-request-failure-gap`.
+
+8. [ ] **[신규, 2026-09-06] 점주 승인 경로의 `Ticket` 상태 처리 및
+   `TicketPause` 만료일 보정 로직 구현**
+   2번/3번이 미사용 자동 처리 경로에서는 해결됐지만, 1번(점주 승인 API)을
+   구현하려면 그 전에 아래를 먼저 정해야 한다:
+   - 승인 대기(`PENDING_APPROVAL`) 상태인 동안 `Ticket`을 어떻게 처리할지
+     — 새 상태(예: 심사 중)를 신설해 이용 자체를 막고 거절 시 원래 상태로
+     복귀시킬지, 승인이 확정되는 순간에만 `REVOKED`로 전이시킬지.
+   - 신규 상태를 만든다면, 심사 기간만큼 유효기간(만료일)을 보정해야
+     하는가 — `TicketPause`(`prisma/schema.prisma`)가 이미 "정지 기간만큼
+     `expiresAt`/`minuteExpireDeadline`을 연장한다"는 동일한 문제를
+     다루도록 설계되어 있으나, 실제 구현이 없다. `pauseTicket`/
+     `resumeTicket` 서비스 메서드 자체가 존재하지 않고, 계산식만
+     `src/ticket/readme.md`에 문서화되어 있을 뿐이다(생성은
+     `prisma/seed.ts`에서만 이루어짐).
+   - 즉 이 작업은 환불 도메인 단독으로 끝나지 않고 `TicketPause`의
+     미구현 보정 로직 구현과 얽혀 있어 범위가 크다 — 별도로 설계 논의
+     필요. (2026-09-06 계획 논의 중 발견, 이번 범위에서는 명시적으로
+     제외하고 여기에 분리해서 남김.)
+
+우선순위: 1번(승인 API)을 구현하려면 8번(승인 경로의 Ticket 처리)을
+먼저 설계해야 한다. 미사용 경로의 2번/3번은 이미 해결되어 더 이상
+선행 조건이 아니다.
 
 ### 참고
 
-설계 논의 및 기각된 대안(멱등키 단독 사용, `PaymentCancelItem`에 상태
-denormalize)은 Claude 메모리
+설계 논의 및 기각된 대안(멱등키 단독 사용, `PaymentCancel`에 partial
+unique index 등)은 Claude 메모리
 `project-refund-cancel-concurrency-design`에 정리되어 있음.
 
 ---

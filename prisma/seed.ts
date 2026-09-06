@@ -72,7 +72,6 @@ async function resetSeedData() {
   await prisma.usageSession.deleteMany({});
   await prisma.ticketPause.deleteMany({});
   await prisma.refundLock.deleteMany({});
-  await prisma.paymentCancelItem.deleteMany({});
   await prisma.paymentCancel.deleteMany({});
   await prisma.payment.deleteMany({});
   await prisma.ticket.deleteMany({});
@@ -596,33 +595,29 @@ async function createOrderWithoutPayment(params: {
   });
 }
 
-interface CancelItemInput {
-  orderItemId: string;
-  amount: number;
-}
-
 /**
- * PG 취소 요청(PaymentCancel) + 상품별 취소 내역(PaymentCancelItem)을 생성한다.
+ * PG 취소 요청(PaymentCancel)을 생성한다 — 한 번의 취소는 상품(OrderItem) 1건만 대상.
  * status='REQUESTED'(미확정)인 경우에만 RefundLock을 함께 생성한다(문서: 환불_동시_진행_방지_프로세스.md).
  * status가 SUCCEEDED/FAILED로 확정되면 RefundLock은 존재하지 않는 것이 정상 상태이므로 생성하지 않는다.
  */
 async function createPaymentCancel(params: {
   paymentId: string;
-  items: CancelItemInput[];
+  orderItemId: string;
+  amount: number;
   reason: string;
   status: PaymentCancelStatus;
   failureReason?: string;
   requestedAt?: Date;
 }) {
   const requestedAt = params.requestedAt ?? now;
-  const totalAmount = params.items.reduce((sum, item) => sum + item.amount, 0);
   const isFinal = params.status !== PaymentCancelStatus.REQUESTED;
 
   return prisma.$transaction(async (tx) => {
     const paymentCancel = await tx.paymentCancel.create({
       data: {
         paymentId: params.paymentId,
-        amount: totalAmount,
+        orderItemId: params.orderItemId,
+        amount: params.amount,
         reason: params.reason,
         status: params.status,
         failureReason:
@@ -637,34 +632,19 @@ async function createPaymentCancel(params: {
       },
     });
 
-    const cancelItems: Awaited<
-      ReturnType<typeof tx.paymentCancelItem.create>
-    >[] = [];
-    for (const item of params.items) {
-      const cancelItem = await tx.paymentCancelItem.create({
+    // 미확정(REQUESTED) 상태만 락을 보유한다 — 상품(orderItemId)당 락 1개(PK 제약)
+    if (params.status === PaymentCancelStatus.REQUESTED) {
+      await tx.refundLock.create({
         data: {
+          orderItemId: params.orderItemId,
           paymentCancelId: paymentCancel.id,
-          orderItemId: item.orderItemId,
-          amount: item.amount,
+          expiresAt: addMinutes(requestedAt, 5),
           createdAt: requestedAt,
         },
       });
-      cancelItems.push(cancelItem);
-
-      // 미확정(REQUESTED) 상태만 락을 보유한다 — 상품(orderItemId)당 락 1개(PK 제약)
-      if (params.status === PaymentCancelStatus.REQUESTED) {
-        await tx.refundLock.create({
-          data: {
-            orderItemId: item.orderItemId,
-            paymentCancelId: paymentCancel.id,
-            expiresAt: addMinutes(requestedAt, 5),
-            createdAt: requestedAt,
-          },
-        });
-      }
     }
 
-    return { paymentCancel, cancelItems };
+    return { paymentCancel };
   });
 }
 
@@ -1297,13 +1277,14 @@ async function main() {
   );
 
   // ═══════════════════════════════════════════════════════
-  // PaymentCancel/PaymentCancelItem/RefundLock 시나리오
+  // PaymentCancel/RefundLock 시나리오
   // ═══════════════════════════════════════════════════════
 
   // 취소1) 전액 취소(SUCCEEDED) - order2(시간권 단품, 45000원) 전체 환불 완료 → 락 없음
   const cancel1 = await createPaymentCancel({
     paymentId: order2.payment.id,
-    items: [{ orderItemId: order2.orderItems[0].id, amount: order2.orderItems[0].amount }],
+    orderItemId: order2.orderItems[0].id,
+    amount: order2.orderItems[0].amount,
     reason: '단순 변심',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 10),
@@ -1312,7 +1293,8 @@ async function main() {
   // 취소2) 상품 단위 부분 취소(SUCCEEDED) - order1(정기권, 100000원)을 15일 사용 후 잔여 절반만 환불
   const cancel2 = await createPaymentCancel({
     paymentId: order1.payment.id,
-    items: [{ orderItemId: order1.orderItems[0].id, amount: Math.floor(order1.orderItems[0].amount / 2) }],
+    orderItemId: order1.orderItems[0].id,
+    amount: Math.floor(order1.orderItems[0].amount / 2),
     reason: '정기권 15일 사용 후 잔여기간 비례 환불',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 2),
@@ -1321,16 +1303,34 @@ async function main() {
   // 취소3) 다건 주문 중 일부 상품만 취소(SUCCEEDED) - order7(정기권+시간권) 중 시간권만 환불
   const cancel3 = await createPaymentCancel({
     paymentId: order7.payment.id,
-    items: [{ orderItemId: order7.orderItems[1].id, amount: order7.orderItems[1].amount }],
+    orderItemId: order7.orderItems[1].id,
+    amount: order7.orderItems[1].amount,
     reason: '시간권만 취소 요청',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 5),
   });
 
-  // 취소4) 다건 주문 전체 취소(SUCCEEDED) - order9(정기권+시간권+시간권) 전부 환불(PaymentCancelItem 3건)
-  const cancel4 = await createPaymentCancel({
+  // 취소4a~4c) 다건 주문 전체 취소(SUCCEEDED) - order9(정기권+시간권+시간권) 각 상품별 개별 취소
+  const cancel4a = await createPaymentCancel({
     paymentId: order9.payment.id,
-    items: order9.orderItems.map((item) => ({ orderItemId: item.id, amount: item.amount })),
+    orderItemId: order9.orderItems[0].id,
+    amount: order9.orderItems[0].amount,
+    reason: '매장 사정으로 전체 주문 취소',
+    status: PaymentCancelStatus.SUCCEEDED,
+    requestedAt: subDays(now, 24),
+  });
+  const cancel4b = await createPaymentCancel({
+    paymentId: order9.payment.id,
+    orderItemId: order9.orderItems[1].id,
+    amount: order9.orderItems[1].amount,
+    reason: '매장 사정으로 전체 주문 취소',
+    status: PaymentCancelStatus.SUCCEEDED,
+    requestedAt: subDays(now, 24),
+  });
+  const cancel4c = await createPaymentCancel({
+    paymentId: order9.payment.id,
+    orderItemId: order9.orderItems[2].id,
+    amount: order9.orderItems[2].amount,
     reason: '매장 사정으로 전체 주문 취소',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 24),
@@ -1339,7 +1339,8 @@ async function main() {
   // 취소5) 동일 상품 1차 부분취소(SUCCEEDED) - order12 두 번째 정기권(81000원) 중 30000원만 우선 환불
   const cancel5 = await createPaymentCancel({
     paymentId: order12.payment.id,
-    items: [{ orderItemId: order12.orderItems[1].id, amount: 30000 }],
+    orderItemId: order12.orderItems[1].id,
+    amount: 30000,
     reason: '정기권 잔여기간 1차 부분 환불',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 15),
@@ -1348,7 +1349,8 @@ async function main() {
   // 취소6) 동일 상품 2차 부분취소(SUCCEEDED) - order12 두 번째 정기권 추가 30000원 환불(누적 60000/81000, 잔여 21000)
   const cancel6 = await createPaymentCancel({
     paymentId: order12.payment.id,
-    items: [{ orderItemId: order12.orderItems[1].id, amount: 30000 }],
+    orderItemId: order12.orderItems[1].id,
+    amount: 30000,
     reason: '정기권 잔여기간 2차 부분 환불',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 10),
@@ -1357,7 +1359,8 @@ async function main() {
   // 취소7) 동일 상품 1차 부분취소(SUCCEEDED) - order8 첫 번째 시간권(50000원)에서 30000원 환불(잔여 20000)
   const cancel7 = await createPaymentCancel({
     paymentId: order8.payment.id,
-    items: [{ orderItemId: order8.orderItems[0].id, amount: 30000 }],
+    orderItemId: order8.orderItems[0].id,
+    amount: 30000,
     reason: '시간권 잔여시간 1차 부분 환불',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 16),
@@ -1366,7 +1369,8 @@ async function main() {
   // 취소8) 동일 상품 2차 취소(SUCCEEDED) - order8 첫 번째 시간권 잔여 20000원까지 마저 환불(누적 50000=전액)
   const cancel8 = await createPaymentCancel({
     paymentId: order8.payment.id,
-    items: [{ orderItemId: order8.orderItems[0].id, amount: 20000 }],
+    orderItemId: order8.orderItems[0].id,
+    amount: 20000,
     reason: '시간권 잔여시간 2차 부분 환불(잔액 전액)',
     status: PaymentCancelStatus.SUCCEEDED,
     requestedAt: subDays(now, 14),
@@ -1375,16 +1379,26 @@ async function main() {
   // 취소9) 미확정 취소(REQUESTED) - order8 두 번째 시간권(50000원) 전액 환불 요청, PG 응답 대기 중 → RefundLock 보유
   const cancel9 = await createPaymentCancel({
     paymentId: order8.payment.id,
-    items: [{ orderItemId: order8.orderItems[1].id, amount: order8.orderItems[1].amount }],
+    orderItemId: order8.orderItems[1].id,
+    amount: order8.orderItems[1].amount,
     reason: '단순 변심',
     status: PaymentCancelStatus.REQUESTED,
     requestedAt: subMinutes(now, 3),
   });
 
-  // 취소10) 미확정 취소(REQUESTED) - order13 정기권+시간권 전체 환불 요청(PaymentCancelItem 2건), PG 응답 대기 → RefundLock 2건
-  const cancel10 = await createPaymentCancel({
+  // 취소10a~10b) 미확정 취소(REQUESTED) - order13 정기권+시간권 각각 개별 환불 요청, PG 응답 대기 → RefundLock 2건
+  const cancel10a = await createPaymentCancel({
     paymentId: order13.payment.id,
-    items: order13.orderItems.map((item) => ({ orderItemId: item.id, amount: item.amount })),
+    orderItemId: order13.orderItems[0].id,
+    amount: order13.orderItems[0].amount,
+    reason: '매장 사정으로 전체 주문 취소 요청',
+    status: PaymentCancelStatus.REQUESTED,
+    requestedAt: subMinutes(now, 8),
+  });
+  const cancel10b = await createPaymentCancel({
+    paymentId: order13.payment.id,
+    orderItemId: order13.orderItems[1].id,
+    amount: order13.orderItems[1].amount,
     reason: '매장 사정으로 전체 주문 취소 요청',
     status: PaymentCancelStatus.REQUESTED,
     requestedAt: subMinutes(now, 8),
@@ -1393,41 +1407,52 @@ async function main() {
   // 취소11) 취소 거절(FAILED) - order14 정기권(100000원) 환불 시도했으나 PG사가 확정적으로 거절 → 락 없음(해제됨)
   const cancel11 = await createPaymentCancel({
     paymentId: order14.payment.id,
-    items: [{ orderItemId: order14.orderItems[2].id, amount: order14.orderItems[2].amount }],
+    orderItemId: order14.orderItems[2].id,
+    amount: order14.orderItems[2].amount,
     reason: '단순 변심',
     status: PaymentCancelStatus.FAILED,
     failureReason: 'PG사 응답: 이미 정산 완료된 거래로 취소 불가',
     requestedAt: subDays(now, 1),
   });
 
-  // 취소12) 미확정 취소(REQUESTED) - order14 시간권 2건만 환불 요청, PG 응답 대기 중 → RefundLock 2건
-  const cancel12 = await createPaymentCancel({
+  // 취소12a~12b) 미확정 취소(REQUESTED) - order14 시간권 2건 각각 개별 환불 요청, PG 응답 대기 중 → RefundLock 2건
+  const cancel12a = await createPaymentCancel({
     paymentId: order14.payment.id,
-    items: [
-      { orderItemId: order14.orderItems[0].id, amount: order14.orderItems[0].amount },
-      { orderItemId: order14.orderItems[1].id, amount: order14.orderItems[1].amount },
-    ],
+    orderItemId: order14.orderItems[0].id,
+    amount: order14.orderItems[0].amount,
+    reason: '시간권만 취소 요청',
+    status: PaymentCancelStatus.REQUESTED,
+    requestedAt: subMinutes(now, 15),
+  });
+  const cancel12b = await createPaymentCancel({
+    paymentId: order14.payment.id,
+    orderItemId: order14.orderItems[1].id,
+    amount: order14.orderItems[1].amount,
     reason: '시간권만 취소 요청',
     status: PaymentCancelStatus.REQUESTED,
     requestedAt: subMinutes(now, 15),
   });
 
-  console.log('PaymentCancel/PaymentCancelItem 생성 완료: 12건 (SUCCEEDED 8, REQUESTED 3, FAILED 1)');
+  console.log('PaymentCancel 생성 완료: 16건 (SUCCEEDED 10, REQUESTED 5, FAILED 1)');
   console.log(
-    'RefundLock 생성 완료: 취소9(1건) + 취소10(2건) + 취소12(2건) = 5건 (REQUESTED 상태만 보유, SUCCEEDED/FAILED는 락 해제됨)',
+    'RefundLock 생성 완료: 취소9(1건) + 취소10a~10b(2건) + 취소12a~12b(2건) = 5건 (REQUESTED 상태만 보유, SUCCEEDED/FAILED는 락 해제됨)',
   );
   void cancel1;
   void cancel2;
   void cancel3;
-  void cancel4;
+  void cancel4a;
+  void cancel4b;
+  void cancel4c;
   void cancel5;
   void cancel6;
   void cancel7;
   void cancel8;
   void cancel9;
-  void cancel10;
+  void cancel10a;
+  void cancel10b;
   void cancel11;
-  void cancel12;
+  void cancel12a;
+  void cancel12b;
 
   // ═══════════════════════════════════════════════════════
   // TicketPause 시나리오 (order1/order7/order9/order12/order13 등의 티켓 활용)
