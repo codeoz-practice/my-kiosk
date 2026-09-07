@@ -136,7 +136,7 @@ export class OrderRepository {
                     seat: { select: { number: true } },
                   },
                 },
-                pauses: {
+                ticketPauses: {
                   where: { resumedAt: null },
                   select: { pausedAt: true },
                 },

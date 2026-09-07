@@ -23,8 +23,9 @@ import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 export interface TransactionLog {
   transactionId: string;
   type: 'ORDER' | 'PAYMENT' | 'SHIPMENT' | 'REFUND';
-  userId: number;
-  orderId?: number;
+  userId: string;
+  orderId: string;
+  orderItemId: string;
   amount?: number;
   status: string;
   metadata?: Record<string, any>;
@@ -45,20 +46,27 @@ export class TransactionLoggerService {
     );
   }
 
-  logOrderCreated(orderId: number, userId: number, amount: number): void {
+  logOrderCreated(
+    orderId: string,
+    orderItemId: string,
+    userId: string,
+    amount: number,
+  ): void {
     this.logTransaction({
       transactionId: `ORDER-${orderId}-${Date.now()}`,
       type: 'ORDER',
       userId,
       orderId,
+      orderItemId,
       amount,
       status: 'CREATED',
     });
   }
 
   logPaymentCompleted(
-    orderId: number,
-    userId: number,
+    orderId: string,
+    orderItemId: string,
+    userId: string,
     amount: number,
     paymentMethod: string,
   ): void {
@@ -67,6 +75,7 @@ export class TransactionLoggerService {
       type: 'PAYMENT',
       userId,
       orderId,
+      orderItemId,
       amount,
       status: 'COMPLETED',
       metadata: { paymentMethod },
@@ -74,8 +83,9 @@ export class TransactionLoggerService {
   }
 
   logRefund(
-    orderId: number,
-    userId: number,
+    orderId: string,
+    orderItemId: string,
+    userId: string,
     amount: number,
     reason: string,
   ): void {
@@ -84,6 +94,7 @@ export class TransactionLoggerService {
       type: 'REFUND',
       userId,
       orderId,
+      orderItemId,
       amount,
       status: 'REFUNDED',
       metadata: { reason },

@@ -81,7 +81,7 @@ export class TicketRepository {
           orderBy: { updatedAt: 'desc' },
           take: 1,
         },
-        pauses: {
+        ticketPauses: {
           where: { resumedAt: null }, // 현재 정지 중인 것만
           select: {
             pausedAt: true,
@@ -125,7 +125,7 @@ export class TicketRepository {
           orderBy: { updatedAt: 'desc' },
           take: 1,
         },
-        pauses: {
+        ticketPauses: {
           where: { resumedAt: null }, // 현재 정지 중인 것만
           select: {
             pausedAt: true,
