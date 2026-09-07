@@ -120,7 +120,7 @@ model Ticket {
   status TicketStatus @default(UNUSED)
   orderItemId String @unique @map("order_item_id")  
   usageSessions UsageSession[]
-  pauses TicketPause[]
+  ticketPauses TicketPause[]
 
   // 시간권 전용
   purchasedMinutes Int? @map("purchased_minutes")   // 구매 시점 부여 시간 스냅샷

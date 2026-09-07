@@ -5,9 +5,14 @@ import { UsageSessionController } from './usage-session.controller';
 import { UsageSessionProcessor } from './usage-session-processor';
 import { UsageSessionService } from './usage-session.service';
 import { TicketModule } from 'src/ticket/ticket.module';
+import { SessionLifecycleModule } from 'src/session-lifecycle/session-lifecycle.module';
 
 @Module({
-  imports: [TicketModule, BullModule.registerQueue({ name: 'usage-session' })],
+  imports: [
+    TicketModule,
+    SessionLifecycleModule,
+    BullModule.registerQueue({ name: 'usage-session' }),
+  ],
   providers: [
     UsageSessionRepository,
     UsageSessionService,

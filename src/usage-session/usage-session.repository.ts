@@ -1,22 +1,21 @@
-import { UsageSession } from './../../node_modules/.prisma/client/index.d';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
   SeatStatus,
-  Ticket,
   TicketStatus,
-  TicketType,
   UsageSessionStatus,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SeatAlreadyOccupiedError } from './errors/seat-already-occupied.error';
 import { JobRegistrationFailedError } from './errors/job-registration-failed.error';
-import { assertDefined } from 'src/common/utils/assert.util';
-import { UsageSessionNotFoundError } from './errors/usage-session-not-found.error';
+import { SessionLifecycleService } from 'src/session-lifecycle/session-lifecycle.service';
 
 @Injectable()
 export class UsageSessionRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sessionLifecycle: SessionLifecycleService,
+  ) {}
 
   async createSession(
     ticketId: string,
@@ -92,56 +91,14 @@ export class UsageSessionRepository {
     }
   }
 
+  // 세션 종료 — SessionLifecycleService에 위임
   async endUsageSession(
     sessionId: string,
     now: Date,
   ): Promise<{ bullmqJobId: string | null }> {
     return await this.prisma.executeTransaction(async (tx) => {
-      const [session] = await tx.$queryRaw<
-        {
-          id: string;
-          status: string;
-          startedAt: Date;
-          ticketId: string;
-          bullmqJobId: string | null;
-        }[]
-      >`
-        SELECT us.id, us.status, us."started_at" AS "startedAt",
-               us."ticket_id" AS "ticketId", us."bullmqJobId"
-          FROM usage_sessions us
-          WHERE us.id = ${sessionId}
-          FOR UPDATE`;
-
-      if (!session) throw new UsageSessionNotFoundError(sessionId);
-      // 이미 종료된 세션 - 멱등 처리 (BullMQ 자동만료와 수동 퇴실이 거의 동시에 들어온 경우)
-      if (session.status !== UsageSessionStatus.ACTIVE) {
-        return { bullmqJobId: session.bullmqJobId };
-      }
-
-      const endedAt = now;
-      // 실제 소비한 시간을 '분 단위'로 정확히 계산 (반올림 정책에 따라 조정)
-      const consumedMinutes = Math.ceil(
-        (endedAt.getTime() - session.startedAt.getTime()) / 60000,
-      );
-
-      await tx.usageSession.update({
-        where: { id: sessionId },
-        data: { status: UsageSessionStatus.ENDED, endedAt },
-      });
-
-      // 이용권 잔여시간 차감 - 유일한 진실의 원천을 여기서 갱신
-      await tx.$executeRaw`
-        UPDATE tickets
-        SET "remaining_minutes" = GREATEST(0, "remaining_minutes" - ${consumedMinutes}),
-            status = CASE
-              WHEN "remaining_minutes" - ${consumedMinutes} <= 0
-              THEN ${TicketStatus.EXHAUSTED}
-              ELSE status
-            END
-        WHERE id = ${session.ticketId}
-      `;
-
-      return { bullmqJobId: session.bullmqJobId };
+      const result = await this.sessionLifecycle.endSession(sessionId, now, tx);
+      return { bullmqJobId: result.bullmqJobId };
     });
   }
 

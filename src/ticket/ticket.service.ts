@@ -16,7 +16,7 @@ type TicketSummarySource = {
   type: TicketType;
   status: TicketStatus;
   usageSessions: { status: UsageSessionStatus; seat: { number: number } }[];
-  pauses: { pausedAt: Date }[];
+  ticketPauses: { pausedAt: Date }[];
 };
 
 type TicketWithRelations = {
@@ -36,7 +36,7 @@ type TicketWithRelations = {
     plannedEndAt: Date;
     seat: { number: number };
   }[];
-  pauses: {
+  ticketPauses: {
     pausedAt: Date;
     pausedReason: string | null;
     pausedBy: string;
@@ -73,7 +73,7 @@ export class TicketService {
       id: ticket.id,
       type: ticket.type,
       status: ticket.status,
-      isPaused: ticket.pauses.length > 0,
+      isPaused: ticket.ticketPauses.length > 0,
       usingSeatNumber: ticket.usageSessions[0]?.seat?.number,
     };
   }
@@ -91,7 +91,7 @@ export class TicketService {
         activationDeadline: ticket.activationDeadline!, // 유효일
         activatedAt: ticket.activatedAt!,
         expiresAt: ticket.expiresAt, // 만료일
-        pausedAt: ticket.pauses[0]?.pausedAt,
+        pausedAt: ticket.ticketPauses[0]?.pausedAt,
         remainingDays: this.calcRemainingDays(ticket.expiresAt),
         seatNumber: ticket.usageSessions[0]?.seat.number,
         lastEnteredAt: ticket.usageSessions[0]?.startedAt,
