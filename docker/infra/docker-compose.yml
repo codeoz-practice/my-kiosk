@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: myapp_db
+      POSTGRES_DB: my_kiosk_db
     ports:
       - "5432:5432"
     volumes:
