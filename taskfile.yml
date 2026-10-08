@@ -1,0 +1,31 @@
+version: '3'
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - |
+        echo ""
+        echo "사용 가능한 명령어 그룹"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  app:    애플리케이션 서버 관련"
+        echo "  deploy: 배포 관련 (build, ssh, update...)"
+        echo "  infra:  인프라 서버 관련"
+        echo "  db:     데이터베이스 관련 (migrate, studio...)"
+        echo ""
+        echo "자주 쓰는 CLI 옵션"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  task --summary db:studio"
+        echo ""
+      - task --list
+
+  infra:up:
+    cmd: docker compose -f ./docker/infra/docker-compose.yml up -d
+
+  infra:down:
+    cmd: docker compose -f ./docker/infra/docker-compose.yml down
+
+  ps:
+    desc: "task ps -- my-kiosk-db"
+    cmds:
+      - docker ps --filter name={{.CLI_ARGS}} --format 'table {{`{{.Names}}`}}\t{{`{{.Image}}`}}\t{{`{{.Status}}`}}\t{{`{{.Ports}}`}}'

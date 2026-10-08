@@ -5,7 +5,7 @@ import { TicketStatus, TicketType } from '@prisma/client';
 import { TicketPauseRepository } from './ticket-pause.repository';
 import { SessionLifecycleService } from 'src/session-lifecycle/session-lifecycle.service';
 import { DomainBadRequestError, DomainConflictError } from 'src/common/errors';
-import { assertDefined } from 'src/common/utils/assert.util';
+import { assertDefined } from '@felix_ys/ts-utils';
 
 @Injectable()
 export class TicketPauseService {

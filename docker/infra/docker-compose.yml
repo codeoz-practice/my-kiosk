@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: temp-cqrs-db
+    container_name: my-kiosk-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -14,7 +14,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: temp-cqrs-redis
+    container_name: my-kiosk-redis
     restart: unless-stopped
     ports:
       - "6379:6379"

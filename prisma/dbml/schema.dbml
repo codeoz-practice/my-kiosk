@@ -59,7 +59,7 @@ Table tickets {
   status TicketStatus [not null, default: 'UNUSED']
   orderItemId String [unique, not null]
   usageSessions usage_sessions [not null]
-  pauses ticket_pauses [not null]
+  ticketPauses ticket_pauses [not null]
   purchasedMinutes Int
   minuteExpireDeadline DateTime
   remainingMinutes Int

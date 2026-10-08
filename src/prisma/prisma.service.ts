@@ -5,12 +5,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-
-// executeTransaction 콜백에서 사용하는 트랜잭션 클라이언트 타입
-export type TransactionClient = Omit<
-  PrismaClient,
-  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
->;
 import { PrismaPg } from '@prisma/adapter-pg';
 
 /**
