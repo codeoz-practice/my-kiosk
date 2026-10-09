@@ -96,9 +96,14 @@
    [환불_정책.md §3](./architecture/환불_정책.md#3-환불-대상-검증) 참고.
 
 5. [ ] **Ledger(정산) 연동 미구현**
-   `PaymentCancel.status`가 `SUCCEEDED`로 확정되는 시점에 매장 정산액을
-   차감하거나(`HELD`/`RELEASABLE`) 회수 대상으로 전이(`CLAWBACK_PENDING`)
-   시키는 로직이 전혀 없다 — [환불_정책.md §5](./architecture/환불_정책.md#5-정산ledger-연동) 참고.
+   `PaymentCancel.status`가 `SUCCEEDED`로 확정되는 시점에 Ledger에
+   환불 레코드를 삽입하는 로직이 전혀 없다. append-only 원장 모델로
+   설계가 재검토되어(2026-10-09) 스키마는 변경 완료됐으나
+   (`Ledger.paymentCancelId`/`orderId`/`settlementBatchId`,
+   `SettlementBatch` 신설), 서비스 로직(레코드 삽입, 정산 배치)은
+   아직 없다 — [환불_정책.md §5](./architecture/환불_정책.md#5-정산ledger-연동)
+   (환불이 정산을 트리거하는 지점), [정산_정책.md](./architecture/정산_정책.md)
+   (정산 시스템 자체의 설계) 참고.
 
 6. [ ] **PG 응답 금액 불일치 시 관리자 알림 미구현**
    `RefundService.callback()`에서 PG 응답 금액이 요청 금액과 다르면

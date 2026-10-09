@@ -80,23 +80,72 @@ enum LedgerStatus {
   HELD
   RELEASABLE
   SETTLED
-  CLAWBACK_PENDING
 
   @@map("ledger_status")
 }
 
+// append-only 원장: 매출/환불 모두 "사실 1건 = 레코드 1건"으로 쌓인다.
+// 환불이 발생해도 기존 레코드를 UPDATE하지 않고 새 음수 레코드를 추가한다.
+// 정산 예정액은 SUM(amount) WHERE orderId = X AND status != SETTLED로 계산한다.
+//
+// orderId를 정산 단위로 쓰는 이유: 결제(매출의 원천)는 Order 단위로
+// 이루어지는 반면 환불은 OrderItem 단위로 발생한다(PaymentCancel.orderItemId
+// 참고). 매출 레코드는 Order 전체 금액을 그대로 쓸 수 있고, 환불 레코드는
+// orderItem.orderId로 소속 Order를 역참조해 같은 orderId에 담으면 "이
+// 주문에 대해 최종 지급할 금액"이 SUM 하나로 정확히 나온다.
 model Ledger {
   id String @id @default(uuid())
   sellerId String
-  tradeId String
-  amount Int
+  orderId String @map("order_id")
+  order Order @relation(fields: [orderId], references: [id])
+  amount Int   // 매출은 양수, 환불은 음수
   status LedgerStatus
   settledAt DateTime? @map("settled_at")
+
+  // 이 레코드가 환불로 생성된 경우에만 설정(매출 레코드는 null).
+  // @unique가 "같은 환불에 대해 레코드를 두 번 추가하지 않는다"는
+  // 멱등성을 DB 레벨에서 보장한다.
+  paymentCancelId String? @unique @map("payment_cancel_id")
+  paymentCancel PaymentCancel? @relation(fields: [paymentCancelId], references: [id])
+
+  // 어느 정산 배치에서 SETTLED로 마감됐는지. 마감 전에는 null.
+  settlementBatchId String? @map("settlement_batch_id")
+  settlementBatch SettlementBatch? @relation(fields: [settlementBatchId], references: [id])
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([sellerId])
-  @@index([tradeId])
+  @@index([orderId, status]) // 정산 배치의 주 조회 패턴: orderId별 미마감 레코드 집계
+  @@index([settlementBatchId])
   @@map("ledger")
+}
+
+enum SettlementBatchStatus {
+  IN_PROGRESS // 배치 실행 중
+  COMPLETED   // 배치 정상 종료
+  FAILED      // 배치 중 에러로 중단(일부만 SETTLED됐을 수 있음)
+}
+
+// 정산 배치 1회 실행의 메타데이터. Ledger row 자체는 "무엇이 지급됐는지"만
+// 말해줄 뿐 "언제, 몇 건이, 총 얼마가, 어떤 배치에서" 처리됐는지는 말해주지
+// 못하므로 이 테이블이 그 정보를 보관한다.
+model SettlementBatch {
+  id String @id @default(uuid())
+  status SettlementBatchStatus @default(IN_PROGRESS)
+
+  startedAt DateTime @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  // 집계 요약(COMPLETED 시점에 확정). 매번 Ledger를 다시 집계하지 않도록
+  // 보관하는 캐시 성격의 필드 - 원본 진실은 어디까지나 연결된 Ledger row들이다.
+  totalAmount Int? @map("total_amount")
+  sellerCount Int? @map("seller_count")
+  ledgerCount Int? @map("ledger_count")
+
+  ledgers Ledger[]
+
+  @@index([status])
+  @@map("settlement_batches")
 }
 
 enum TicketType {
@@ -222,6 +271,7 @@ model Order {
 
   orderItems OrderItem[]
   payments Payment[]
+  ledgers Ledger[] // 이 주문에 대한 정산 원장(매출 1건 + 환불 0건 이상)
 
   shop Shop @relation(fields: [shopId], references: [id])
   user User @relation(fields: [userId], references: [id])
@@ -331,6 +381,7 @@ model PaymentCancel {
   orderItemId String @map("order_item_id") // 이 취소 요청의 대상 상품(1:1 — 한 번의 취소는 상품 1건만 대상)
   orderItem OrderItem @relation(fields: [orderItemId], references: [id])
   locks RefundLock[] // 이 취소 요청이 보유 중인 상품별 락(확정되면 삭제됨)
+  ledger Ledger? // SUCCEEDED 확정 시 생성되는 원장 레코드(1:1 — 멱등키로 1건만 허용)
 
   @@index([paymentId])
   @@index([orderItemId])
